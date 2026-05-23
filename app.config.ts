@@ -17,6 +17,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     supportsTablet: false,
     bundleIdentifier: 'com.polaris.app',
+    googleServicesFile: './GoogleService-Info.plist',
     infoPlist: {
       NSMicrophoneUsageDescription: 'Polaris uses the microphone for voice questions during audio briefings.',
     },
