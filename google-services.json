@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "439207010999-hqgp3tq0j6h4gr86c068ic24msk5bgg6.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.yukad.polaris",
+            "certificate_hash": "46bf16dcfff77518337f7220656d8bbfb66127c1"
+          }
+        },
+        {
           "client_id": "439207010999-9qccl34rpcsald4sdbn7d495ike1agno.apps.googleusercontent.com",
           "client_type": 3
         }
