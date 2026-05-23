@@ -1,0 +1,7 @@
+<svg width="600" height="600" viewBox="0 0 600 600" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="orbit-rings" opacity="0.5">
+  <circle cx="300" cy="300" r="120" stroke="white" stroke-opacity="0.4"/>
+  <circle cx="300" cy="300" r="180" stroke="white" stroke-opacity="0.25"/>
+  <circle cx="300" cy="300" r="240" stroke="white" stroke-opacity="0.15"/>
+</g>
+</svg>

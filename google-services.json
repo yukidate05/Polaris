@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "439207010999",
+    "project_id": "polaris-app-yukid",
+    "storage_bucket": "polaris-app-yukid.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:439207010999:android:b77ca5d42a87f23a8d6332",
+        "android_client_info": {
+          "package_name": "com.yukad.polaris"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "439207010999-9qccl34rpcsald4sdbn7d495ike1agno.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD-eBBXkpH-1J4J2xuMdC3d6eFZ55JvilA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "439207010999-9qccl34rpcsald4sdbn7d495ike1agno.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "439207010999-r4ghca0ihkd8i8t6m647ko50a91lpbpn.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.polaris.app"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
