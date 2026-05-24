@@ -14,11 +14,27 @@
       },
       "oauth_client": [
         {
+          "client_id": "439207010999-c7a42tbavo69euki9r9cvpruiom3k4go.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.yukid.polaris",
+            "certificate_hash": "4c47f546da879767d19a70af8b85adaf1cab2810"
+          }
+        },
+        {
           "client_id": "439207010999-hqgp3tq0j6h4gr86c068ic24msk5bgg6.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.yukid.polaris",
             "certificate_hash": "46bf16dcfff77518337f7220656d8bbfb66127c1"
+          }
+        },
+        {
+          "client_id": "439207010999-sfjegqraftdsodo3db4t7b7738pcdmbi.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.yukid.polaris",
+            "certificate_hash": "a6111e39445f6cd68e81e8eef8f56c8ffa987294"
           }
         },
         {
@@ -52,3 +68,4 @@
   ],
   "configuration_version": "1"
 }
+
