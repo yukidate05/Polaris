@@ -7,6 +7,9 @@ import { useAuthStore } from '@stores/authStore';
 import { useUserPreferencesStore } from '@stores/userPreferencesStore';
 import { Colors } from '@constants/colors';
 import { router } from 'expo-router';
+import Constants from 'expo-constants';
+
+const isExpoGo = Constants.appOwnership === 'expo';
 
 const STATIC_PROVIDERS = [
   { id: 'notion', label: 'Notion',    icon: 'document-text-outline' as const },
@@ -24,6 +27,23 @@ export default function SettingsScreen() {
     { id: 'gmail',           label: 'Gmail',            icon: 'mail-outline' as const,     connected: hasGoogleAccess },
     ...STATIC_PROVIDERS.map((p) => ({ ...p, connected: false })),
   ];
+
+  async function handleConnectGoogle() {
+    if (isExpoGo) {
+      Alert.alert('Expo Go では利用不可', 'Gmail連携はdev buildまたは本番ビルドで利用できます。');
+      return;
+    }
+    try {
+      const { accessToken } = await authService.signInWithGoogle();
+      if (accessToken) {
+        useAuthStore.getState().setGoogleAccessToken(accessToken);
+        Alert.alert('接続完了', 'GmailとGoogle Calendarが連携されました。');
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      Alert.alert('連携エラー', msg);
+    }
+  }
 
   async function handleSignOut() {
     Alert.alert('ログアウト', 'ログアウトしますか？', [
@@ -70,7 +90,14 @@ export default function SettingsScreen() {
             <GlassCard>
               {sourceProviders.map((source, i) => (
                 <View key={source.id}>
-                  <TouchableOpacity style={styles.sourceRow}>
+                  <TouchableOpacity
+                    style={styles.sourceRow}
+                    onPress={
+                      (source.id === 'gmail' || source.id === 'google_calendar') && !source.connected
+                        ? handleConnectGoogle
+                        : undefined
+                    }
+                  >
                     <View style={styles.sourceIconWrapper}>
                       <Ionicons name={source.icon} size={18} color={Colors.brand.primary} />
                     </View>
