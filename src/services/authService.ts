@@ -18,9 +18,12 @@ function getGoogleSignin() {
   const mod = require('@react-native-google-signin/google-signin');
   const GoogleSignin = mod.GoogleSignin as typeof import('@react-native-google-signin/google-signin').GoogleSignin;
   GoogleSignin.configure({
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
-    // Gmail + Calendar read-only access for briefing generation
+    // OAuth client IDs are public identifiers (visible in google-services.json / URL scheme).
+    // Hardcoded fallbacks ensure EAS builds work without env vars uploaded to EAS.
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID
+      ?? '439207010999-9qccl34rpcsald4sdbn7d495ike1agno.apps.googleusercontent.com',
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID
+      ?? '439207010999-r4ghca0ihkd8i8t6m647ko50a91lpbpn.apps.googleusercontent.com',
     scopes: [
       'https://www.googleapis.com/auth/gmail.readonly',
       'https://www.googleapis.com/auth/calendar.readonly',
