@@ -9,7 +9,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:439207010999:android:b77ca5d42a87f23a8d6332",
         "android_client_info": {
-          "package_name": "com.yukad.polaris"
+          "package_name": "com.yukid.polaris"
         }
       },
       "oauth_client": [
@@ -17,7 +17,7 @@
           "client_id": "439207010999-hqgp3tq0j6h4gr86c068ic24msk5bgg6.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
-            "package_name": "com.yukad.polaris",
+            "package_name": "com.yukid.polaris",
             "certificate_hash": "46bf16dcfff77518337f7220656d8bbfb66127c1"
           }
         },
