@@ -22,7 +22,7 @@ export default function LoginScreen() {
     } catch (error: any) {
       // statusCodes.SIGN_IN_CANCELLED = user dismissed
       if (error.code !== '12501') {
-        Alert.alert('エラー', error.message ?? 'Googleログインに失敗しました。');
+        Alert.alert('エラー', `[${error.code}] ${error.message ?? 'Googleログインに失敗しました。'}`);
       }
     } finally {
       setLoading(null);
