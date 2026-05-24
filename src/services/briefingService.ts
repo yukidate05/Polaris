@@ -1,6 +1,6 @@
 import type { GoogleData } from './googleDataService';
 import { claudeService, type ChapterDraft } from './claudeService';
-import { elevenlabsService } from './elevenlabsService';
+import { googleTtsService } from './googleTtsService';
 
 export interface BriefingChapter {
   id:       string;
@@ -134,7 +134,7 @@ export const briefingService = {
     // Step 2: Generate audio (ElevenLabs or null → expo-speech fallback)
     let audioUri: string | null = null;
     try {
-      audioUri = await elevenlabsService.generateAudio(fullText);
+      audioUri = await googleTtsService.generateAudio(fullText);
     } catch {
       audioUri = null;
     }
@@ -162,7 +162,7 @@ export const briefingService = {
 
     let audioUri: string | null = null;
     try {
-      audioUri = await elevenlabsService.generateAudio(fullText);
+      audioUri = await googleTtsService.generateAudio(fullText);
     } catch {
       audioUri = null;
     }
