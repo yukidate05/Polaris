@@ -22,7 +22,11 @@ function getGoogleSignin() {
       ?? '439207010999-9qccl34rpcsald4sdbn7d495ike1agno.apps.googleusercontent.com',
     iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID
       ?? '439207010999-r4ghca0ihkd8i8t6m647ko50a91lpbpn.apps.googleusercontent.com',
-    // offlineAccess and Gmail/Calendar scopes removed temporarily to diagnose DEVELOPER_ERROR
+    offlineAccess: true,
+    scopes: [
+      'https://www.googleapis.com/auth/gmail.readonly',
+      'https://www.googleapis.com/auth/calendar.readonly',
+    ],
   });
   return GoogleSignin;
 }

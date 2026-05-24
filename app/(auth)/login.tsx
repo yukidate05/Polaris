@@ -5,19 +5,22 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { GradientBackground, PolarisOrb, Button, GlassCard } from '@components/ui';
 import { authService } from '@services/authService';
+import { userService } from '@services/userService';
 import { useAuthStore } from '@stores/authStore';
 import { Colors } from '@constants/colors';
 
 export default function LoginScreen() {
   const [loading, setLoading] = useState<'google' | 'apple' | null>(null);
-  const { setLoading: setStoreLoading, setGoogleAccessToken } = useAuthStore();
+  const { setLoading: setStoreLoading, setGoogleAccessToken, setProfile } = useAuthStore();
 
   async function handleGoogleSignIn() {
     setLoading('google');
     setStoreLoading(true);
     try {
-      const { accessToken } = await authService.signInWithGoogle();
+      const { user, accessToken } = await authService.signInWithGoogle();
       if (accessToken) setGoogleAccessToken(accessToken);
+      const profile = await userService.upsertProfile(user);
+      setProfile(profile);
       router.replace('/(tabs)/home');
     } catch (error: any) {
       // statusCodes.SIGN_IN_CANCELLED = user dismissed

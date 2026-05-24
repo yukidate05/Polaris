@@ -5,6 +5,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { authService } from '@services/authService';
+import { userService } from '@services/userService';
 import { useAuthStore } from '@stores/authStore';
 import { initRevenueCat } from '@lib/revenuecat';
 import { initPostHog, analytics } from '@lib/analytics';
@@ -19,21 +20,27 @@ const queryClient = new QueryClient({
 });
 
 export default function RootLayout() {
-  const { setUser, setInitialized } = useAuthStore();
+  const { setUser, setProfile, setGoogleAccessToken, setInitialized } = useAuthStore();
 
   useEffect(() => {
     // Initialize analytics
     initPostHog();
     analytics.appOpen();
 
-    const unsubscribe = authService.onAuthStateChange((user) => {
+    const unsubscribe = authService.onAuthStateChange(async (user) => {
       setUser(user);
       setInitialized();
 
       if (user) {
-        // Initialize RevenueCat and PostHog with user ID after login
         initRevenueCat(user.uid);
         initPostHog(user.uid);
+        // Ensure Firestore profile exists and load it
+        userService.upsertProfile(user).then(setProfile).catch(() => null);
+        // Restore Google access token for Gmail/Calendar API calls
+        authService.getAccessToken().then((t) => { if (t) setGoogleAccessToken(t); }).catch(() => null);
+      } else {
+        setProfile(null);
+        setGoogleAccessToken(null);
       }
     });
     return unsubscribe;

@@ -8,17 +8,22 @@ import { useUserPreferencesStore } from '@stores/userPreferencesStore';
 import { Colors } from '@constants/colors';
 import { router } from 'expo-router';
 
-const SOURCE_PROVIDERS = [
-  { id: 'google_calendar', label: 'Google Calendar', icon: 'calendar-outline' as const, connected: true },
-  { id: 'gmail',           label: 'Gmail',            icon: 'mail-outline' as const,     connected: false },
-  { id: 'notion',          label: 'Notion',           icon: 'document-text-outline' as const, connected: false },
-  { id: 'slack',           label: 'Slack',            icon: 'chatbubbles-outline' as const, connected: false },
-  { id: 'rss',             label: 'RSS Feeds',        icon: 'radio-outline' as const,    connected: false },
+const STATIC_PROVIDERS = [
+  { id: 'notion', label: 'Notion',    icon: 'document-text-outline' as const },
+  { id: 'slack',  label: 'Slack',     icon: 'chatbubbles-outline' as const },
+  { id: 'rss',    label: 'RSS Feeds', icon: 'radio-outline' as const },
 ] as const;
 
 export default function SettingsScreen() {
-  const { user, profile, reset: resetAuth } = useAuthStore();
+  const { user, profile, googleAccessToken, reset: resetAuth } = useAuthStore();
   const { preferences, setPreferences } = useUserPreferencesStore();
+
+  const hasGoogleAccess = !!googleAccessToken;
+  const sourceProviders = [
+    { id: 'google_calendar', label: 'Google Calendar', icon: 'calendar-outline' as const, connected: hasGoogleAccess },
+    { id: 'gmail',           label: 'Gmail',            icon: 'mail-outline' as const,     connected: hasGoogleAccess },
+    ...STATIC_PROVIDERS.map((p) => ({ ...p, connected: false })),
+  ];
 
   async function handleSignOut() {
     Alert.alert('ログアウト', 'ログアウトしますか？', [
@@ -63,7 +68,7 @@ export default function SettingsScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>連携サービス</Text>
             <GlassCard>
-              {SOURCE_PROVIDERS.map((source, i) => (
+              {sourceProviders.map((source, i) => (
                 <View key={source.id}>
                   <TouchableOpacity style={styles.sourceRow}>
                     <View style={styles.sourceIconWrapper}>
@@ -76,7 +81,7 @@ export default function SettingsScreen() {
                       </Text>
                     </View>
                   </TouchableOpacity>
-                  {i < SOURCE_PROVIDERS.length - 1 && <View style={styles.divider} />}
+                  {i < sourceProviders.length - 1 && <View style={styles.divider} />}
                 </View>
               ))}
             </GlassCard>
