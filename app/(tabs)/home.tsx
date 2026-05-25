@@ -82,8 +82,8 @@ function KeepCard({ item }: { item: KeepListeningItem }) {
 export default function HomeScreen() {
   const { user, profile, googleAccessToken } = useAuthStore();
   const {
-    status, googleData, script,
-    setStatus, setGoogleData, setScript, setError,
+    status, googleData, script, hasPlayed,
+    setStatus, setGoogleData, setScript, setError, setHasPlayed,
   } = useBriefingStore();
 
   const firstName = profile?.displayName?.split(' ')[0]
@@ -128,14 +128,12 @@ export default function HomeScreen() {
       }
 
       setStatus('generating_script');
-      // The briefingService internally sets generating_audio when appropriate,
-      // but we call it as one async step. Show a brief intermediate state.
-      const script = await briefingService.generate(data, firstName);
+      const script = await briefingService.generate(data, firstName, [], hasPlayed);
       setScript(script);
     } catch (e: any) {
       setError(e?.message ?? 'Unknown error');
     }
-  }, [isGenerating, googleData, googleAccessToken, firstName]);
+  }, [isGenerating, googleData, googleAccessToken, firstName, hasPlayed]);
 
   // Auto-generate on first load
   useEffect(() => {
@@ -145,7 +143,10 @@ export default function HomeScreen() {
   }, []);
 
   const handlePlay = () => {
-    if (script) router.push('/player');
+    if (script) {
+      setHasPlayed(true);
+      router.push('/player');
+    }
   };
 
   const unread      = googleData?.unreadCount  ?? 0;

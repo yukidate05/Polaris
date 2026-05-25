@@ -14,11 +14,9 @@ export interface BriefingScript {
   fullText:         string;
   chapters:         BriefingChapter[];
   estimatedSeconds: number;
-  audioUri:         string | null; // null → falls back to expo-speech
-  topic:            string;        // "今日のブリーフィング" or custom DeepCast topic
+  audioUri:         string | null;
+  topic:            string;
 }
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
 
 function todayString(): string {
   const now  = new Date();
@@ -26,16 +24,15 @@ function todayString(): string {
   return `${now.getMonth() + 1}月${now.getDate()}日、${days[now.getDay()]}`;
 }
 
-function greeting(): string {
-  const h = new Date().getHours();
-  if (h < 12) return 'おはようございます';
-  if (h < 17) return 'こんにちは';
+function greeting(hour: number): string {
+  if (hour < 12) return 'おはようございます';
+  if (hour < 17) return 'こんにちは';
   return 'こんばんは';
 }
 
 function estimateChapterTimes(texts: string[], totalSec: number): number[] {
-  const total = texts.reduce((s, t) => s + t.length, 0);
-  let cursor  = 0;
+  const total  = texts.reduce((s, t) => s + t.length, 0);
+  let cursor   = 0;
   return texts.map((t) => {
     const start = total > 0 ? Math.floor((cursor / total) * totalSec) : 0;
     cursor += t.length;
@@ -43,9 +40,8 @@ function estimateChapterTimes(texts: string[], totalSec: number): number[] {
   });
 }
 
-// Template fallback when no Claude API key
 function templateChapters(data: GoogleData, userName: string): ChapterDraft[] {
-  const g  = greeting();
+  const g  = greeting(new Date().getHours());
   const dt = todayString();
 
   const emailText = data.unreadCount === 0
@@ -70,43 +66,31 @@ function templateChapters(data: GoogleData, userName: string): ChapterDraft[] {
         return t;
       })();
 
+  const makeDlg = (text: string) => [{ speaker: 'A' as const, text }];
+
   return [
-    {
-      id:       'opening',
-      title:    'おはよう',
-      iconName: 'sunny-outline',
-      text:     `${g}、${userName}さん。今日は${dt}です。Polarisがあなたの今日をまとめました。`,
-    },
-    {
-      id:       'email',
-      title:    'メール',
-      iconName: 'mail-outline',
-      text:     emailText,
-    },
-    {
-      id:       'schedule',
-      title:    '予定',
-      iconName: 'calendar-outline',
-      text:     calText,
-    },
-    {
-      id:       'insights',
-      title:    'インサイト',
-      iconName: 'bulb-outline',
-      text:     '今日も素晴らしい一日をお過ごしください。',
-    },
+    { id: 'opening',  title: 'おはよう', iconName: 'sunny-outline',
+      text: `${g}、${userName}さん。今日は${dt}です。`,
+      dialogue: makeDlg(`${g}、${userName}さん。今日は${dt}です。`) },
+    { id: 'email',    title: 'メール',   iconName: 'mail-outline',
+      text: emailText, dialogue: makeDlg(emailText) },
+    { id: 'schedule', title: '予定',     iconName: 'calendar-outline',
+      text: calText,   dialogue: makeDlg(calText) },
+    { id: 'insights', title: 'インサイト', iconName: 'bulb-outline',
+      text: '今日も素晴らしい一日をお過ごしください。',
+      dialogue: makeDlg('今日も素晴らしい一日をお過ごしください。') },
   ];
 }
 
-// ── Main service ───────────────────────────────────────────────────────────────
-
 export const briefingService = {
   async generate(
-    data:      GoogleData,
-    userName:  string,
-    interests: string[] = []
+    data:        GoogleData,
+    userName:    string,
+    interests:   string[] = [],
+    isReturning: boolean  = false,
   ): Promise<BriefingScript> {
-    // Step 1: Generate chapters (Claude or template)
+    const currentHour = new Date().getHours();
+
     let rawChapters: ChapterDraft[];
     try {
       const result = await claudeService.generateBriefing({
@@ -116,6 +100,8 @@ export const briefingService = {
         todayEvents:    data.todayEvents,
         tomorrowEvents: data.tomorrowEvents,
         interests,
+        currentHour,
+        isReturning,
       });
       rawChapters = result.chapters;
     } catch {
@@ -127,25 +113,26 @@ export const briefingService = {
     const times            = estimateChapterTimes(rawChapters.map((c) => c.text), estimatedSeconds);
 
     const chapters: BriefingChapter[] = rawChapters.map((c, i) => ({
-      ...c,
+      id:       c.id,
+      title:    c.title,
+      iconName: c.iconName,
+      text:     c.text,
       startSec: times[i],
     }));
 
-    // Step 2: Generate audio (ElevenLabs or null → expo-speech fallback)
+    // Build flat dialogue from all chapters
+    const allDialogue = rawChapters.flatMap((c) => c.dialogue ?? []);
+
     let audioUri: string | null = null;
     try {
-      audioUri = await googleTtsService.generateAudio(fullText);
+      audioUri = allDialogue.length > 0
+        ? await googleTtsService.generateDialogueAudio(allDialogue)
+        : await googleTtsService.generateAudio(fullText);
     } catch {
       audioUri = null;
     }
 
-    return {
-      fullText,
-      chapters,
-      estimatedSeconds,
-      audioUri,
-      topic: '今日のブリーフィング',
-    };
+    return { fullText, chapters, estimatedSeconds, audioUri, topic: '今日のブリーフィング' };
   },
 
   async generateDeepcast(topic: string): Promise<BriefingScript> {
@@ -156,13 +143,20 @@ export const briefingService = {
     const times            = estimateChapterTimes(result.chapters.map((c) => c.text), estimatedSeconds);
 
     const chapters: BriefingChapter[] = result.chapters.map((c, i) => ({
-      ...c,
+      id:       c.id,
+      title:    c.title,
+      iconName: c.iconName,
+      text:     c.text,
       startSec: times[i],
     }));
 
+    const allDialogue = result.chapters.flatMap((c) => c.dialogue ?? []);
+
     let audioUri: string | null = null;
     try {
-      audioUri = await googleTtsService.generateAudio(fullText);
+      audioUri = allDialogue.length > 0
+        ? await googleTtsService.generateDialogueAudio(allDialogue)
+        : await googleTtsService.generateAudio(fullText);
     } catch {
       audioUri = null;
     }
