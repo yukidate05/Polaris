@@ -104,7 +104,8 @@ export const briefingService = {
         isReturning,
       });
       rawChapters = result.chapters;
-    } catch {
+    } catch (err) {
+      console.error('[briefing] script generation failed:', err);
       rawChapters = templateChapters(data, userName);
     }
 
@@ -123,15 +124,19 @@ export const briefingService = {
     // Build flat dialogue from all chapters
     const allDialogue = rawChapters.flatMap((c) => c.dialogue ?? []);
 
+    console.log('[briefing] dialogue turns:', allDialogue.length, 'fullText length:', fullText.length);
+
     let audioUri: string | null = null;
     try {
       audioUri = allDialogue.length > 0
         ? await googleTtsService.generateDialogueAudio(allDialogue)
         : await googleTtsService.generateAudio(fullText);
-    } catch {
+    } catch (err) {
+      console.error('[briefing] TTS failed:', err);
       audioUri = null;
     }
 
+    console.log('[briefing] audioUri:', audioUri);
     return { fullText, chapters, estimatedSeconds, audioUri, topic: '今日のブリーフィング' };
   },
 

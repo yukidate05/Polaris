@@ -29,6 +29,7 @@ function timeContext(hour: number): string {
 
 async function callGemini(prompt: string, systemPrompt: string): Promise<string> {
   const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+  console.log('[gemini] apiKey present:', !!apiKey);
   if (!apiKey) throw new Error('no_key');
 
   const resp = await fetch(`${API_URL}?key=${apiKey}`, {
@@ -37,17 +38,21 @@ async function callGemini(prompt: string, systemPrompt: string): Promise<string>
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 4000 },
+      generationConfig: { maxOutputTokens: 4000 },
     }),
   });
 
+  console.log('[gemini] response status:', resp.status);
   if (!resp.ok) {
     const body = await resp.text().catch(() => '');
+    console.error('[gemini] error body:', body.slice(0, 200));
     throw new Error(`gemini:${resp.status} ${body.slice(0, 100)}`);
   }
 
   const data = await resp.json();
-  return data.candidates[0].content.parts[0].text as string;
+  const text = data.candidates[0].content.parts[0].text as string;
+  console.log('[gemini] response length:', text.length);
+  return text;
 }
 
 function parseChapters(text: string): ChapterDraft[] {
