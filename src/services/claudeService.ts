@@ -1,5 +1,4 @@
-const API_URL = 'https://api.anthropic.com/v1/messages';
-const MODEL   = 'claude-opus-4-7';
+const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
 export interface DialogueTurn {
   speaker: 'A' | 'B';
@@ -28,6 +27,42 @@ function timeContext(hour: number): string {
   return `夜遅くまでお疲れ様。今は${hour}時`;
 }
 
+async function callGemini(prompt: string, systemPrompt: string): Promise<string> {
+  const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+  if (!apiKey) throw new Error('no_key');
+
+  const resp = await fetch(`${API_URL}?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 4000 },
+    }),
+  });
+
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`gemini:${resp.status} ${body.slice(0, 100)}`);
+  }
+
+  const data = await resp.json();
+  return data.candidates[0].content.parts[0].text as string;
+}
+
+function parseChapters(text: string): ChapterDraft[] {
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('gemini_parse');
+
+  const parsed = JSON.parse(match[0]);
+  return (parsed.chapters as Array<{
+    id: string; title: string; iconName: string; dialogue: DialogueTurn[];
+  }>).map((c) => ({
+    ...c,
+    text: c.dialogue.map((t) => t.text).join('　'),
+  }));
+}
+
 export const claudeService = {
   async generateBriefing(params: {
     userName:       string;
@@ -39,9 +74,6 @@ export const claudeService = {
     currentHour:    number;
     isReturning:    boolean;
   }): Promise<ClaudeBriefingResult> {
-    const apiKey = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY;
-    if (!apiKey) throw new Error('no_key');
-
     const today    = new Date();
     const dayNames = ['日曜日','月曜日','火曜日','水曜日','木曜日','金曜日','土曜日'];
     const dateStr  = `${today.getMonth() + 1}月${today.getDate()}日（${dayNames[today.getDay()]}）`;
@@ -80,7 +112,7 @@ ${tomorrowLines}
 
 興味: ${interestText}
 
-必ずJSONのみを返してください（マークダウン禁止）:
+JSONのみを返してください:
 {
   "chapters": [
     {
@@ -146,49 +178,18 @@ ${tomorrowLines}
 - ${params.userName}さんへの直接語りかけを自然に混ぜる
 - Ariaは「〜だよ」「〜だね」、Kaiは「〜ですね」「〜でしょう」の語尾`;
 
-    const resp = await fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 4000,
-        system: '魅力的な日本語ポッドキャストの対話台本を生成するAIです。必ずJSONのみ返してください。',
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-
-    if (!resp.ok) throw new Error(`claude:${resp.status}`);
-
-    const data  = await resp.json();
-    const text  = data.content[0].text as string;
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('claude_parse');
-
-    const parsed   = JSON.parse(match[0]);
-    const chapters = (parsed.chapters as Array<{
-      id: string; title: string; iconName: string; dialogue: DialogueTurn[];
-    }>).map((c) => ({
-      ...c,
-      text: c.dialogue.map((t) => t.text).join('　'),
-    })) as ChapterDraft[];
-
+    const text     = await callGemini(prompt, '魅力的な日本語ポッドキャストの対話台本を生成するAIです。JSONのみ返してください。');
+    const chapters = parseChapters(text);
     const fullText = chapters.map((c) => c.text).join('　');
     return { chapters, fullText };
   },
 
   async generateDeepcast(topic: string): Promise<ClaudeBriefingResult> {
-    const apiKey = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY;
-    if (!apiKey) throw new Error('no_key');
-
     const prompt = `「${topic}」について、5分のポッドキャスト解説を2人のMCの対話形式で日本語生成してください。
 
 MCs: Aria（A：明るい女性MC） / Kai（B：知的な男性MC）
 
-必ずJSONのみを返してください:
+JSONのみを返してください:
 {
   "chapters": [
     {"id":"intro",   "title":"はじめに",  "iconName":"information-circle-outline",
@@ -204,36 +205,8 @@ MCs: Aria（A：明るい女性MC） / Kai（B：知的な男性MC）
 
 制約: 各chapterは4往復、全体で約1500字（5分）、話し言葉のみ、記号禁止`;
 
-    const resp = await fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 4000,
-        system: '魅力的な日本語ポッドキャストの対話台本を生成するAIです。必ずJSONのみ返してください。',
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-
-    if (!resp.ok) throw new Error(`claude:${resp.status}`);
-
-    const data  = await resp.json();
-    const text  = data.content[0].text as string;
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('claude_parse');
-
-    const parsed   = JSON.parse(match[0]);
-    const chapters = (parsed.chapters as Array<{
-      id: string; title: string; iconName: string; dialogue: DialogueTurn[];
-    }>).map((c) => ({
-      ...c,
-      text: c.dialogue.map((t) => t.text).join('　'),
-    })) as ChapterDraft[];
-
+    const text     = await callGemini(prompt, '魅力的な日本語ポッドキャストの対話台本を生成するAIです。JSONのみ返してください。');
+    const chapters = parseChapters(text);
     const fullText = chapters.map((c) => c.text).join('　');
     return { chapters, fullText };
   },
