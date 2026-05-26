@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import type { DialogueTurn } from './claudeService';
 
 const TTS_URL = 'https://texttospeech.googleapis.com/v1/text:synthesize';
