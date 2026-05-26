@@ -1,4 +1,5 @@
 const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+const GENERATION_CONFIG = { maxOutputTokens: 4000, thinkingConfig: { thinkingBudget: 0 } };
 
 export interface DialogueTurn {
   speaker: 'A' | 'B';
@@ -38,7 +39,7 @@ async function callGemini(prompt: string, systemPrompt: string): Promise<string>
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 4000 },
+      generationConfig: GENERATION_CONFIG,
     }),
   });
 
