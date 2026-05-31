@@ -50,10 +50,14 @@ function uint8ToBase64(arr: Uint8Array): string {
   return btoa(binary);
 }
 
+// Circuit breaker: skip Gemini TTS for the session if quota is exceeded
+let quotaExceeded = false;
+
 export const geminiTtsService = {
   async generateDialogueAudio(dialogue: DialogueTurn[]): Promise<string> {
     const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
     if (!apiKey) throw new Error('no_key');
+    if (quotaExceeded) throw new Error('gemini-tts:quota_exceeded');
 
     const transcript = dialogue
       .map((t) => `${SPEAKERS[t.speaker].name}: ${t.text}`)
@@ -82,6 +86,10 @@ export const geminiTtsService = {
 
     if (!resp.ok) {
       const err = await resp.text().catch(() => '');
+      if (resp.status === 429) {
+        quotaExceeded = true;
+        console.warn('[gemini-tts] quota exceeded — switching to Google TTS for this session');
+      }
       throw new Error(`gemini-tts:${resp.status} ${err.slice(0, 150)}`);
     }
 
