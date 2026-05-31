@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, ActivityIndicator, ImageBackground, Dimensions,
+  StyleSheet, ActivityIndicator, Dimensions,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,7 +16,6 @@ import Constants from 'expo-constants';
 const { height: SCREEN_H } = Dimensions.get('window');
 const HERO_H = Math.round(SCREEN_H * 0.60);
 const isExpoGo = Constants.appOwnership === 'expo';
-const HERO_IMG = require('../../img/Huxe/3847.jpg');
 
 const MONTHS = [
   'January','February','March','April','May','June',
@@ -138,12 +137,18 @@ export default function HomeScreen() {
 
         {/* ── Hero ── */}
         <View style={[s.hero, { height: HERO_H }]}>
-          <ImageBackground source={HERO_IMG} style={StyleSheet.absoluteFill} resizeMode="cover" />
-
-          {/* Top scrim for header legibility */}
+          {/* Sunrise gradient */}
           <LinearGradient
-            colors={['rgba(0,0,0,0.45)', 'transparent']}
-            style={[StyleSheet.absoluteFill, { height: 140 }]}
+            colors={['#12082A', '#3B1230', '#7A2530', '#B84820', '#D4730E', '#C89010']}
+            locations={[0, 0.22, 0.42, 0.62, 0.82, 1]}
+            style={StyleSheet.absoluteFill}
+          />
+          {/* Horizontal motion streaks overlay */}
+          <LinearGradient
+            colors={['rgba(180,80,20,0.18)', 'rgba(200,120,10,0.28)', 'rgba(180,80,20,0.18)']}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={[StyleSheet.absoluteFill, { top: '40%', height: '35%' }]}
           />
 
           {/* Bottom fade to black */}
