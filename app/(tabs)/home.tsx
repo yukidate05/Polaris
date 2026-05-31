@@ -1,12 +1,13 @@
-import { useEffect, useCallback, useState, useRef } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, ActivityIndicator, Dimensions, Animated,
+  StyleSheet, ActivityIndicator, Dimensions,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { AuroraBackground } from '@components/ui';
 import { useAuthStore } from '@stores/authStore';
 import { useBriefingStore, type BriefingStatus } from '@stores/briefingStore';
 import { googleDataService, MOCK_GOOGLE_DATA } from '@services/googleDataService';
@@ -49,61 +50,6 @@ const DISCOVER_CARDS = [
   { id: '3', title: 'テック',       desc: "What's shaping tech",        c1: '#5BB87A', c2: '#3A8F58' },
   { id: '4', title: 'ビジネス',     desc: 'Business & economy',        c1: '#B8975B', c2: '#8F723A' },
 ];
-
-// ── Aurora animated background ──────────────────────────────────────────────────
-// HTML参考: createConicGradient + screen blend で複数バンドが独立回転
-// RN版: 4つのLinearGradientをAnimated.loopで独立してパルス＋漂流
-
-const AURORA_BANDS = [
-  { colors: ['transparent','rgba(0,230,180,0.60)','rgba(0,180,230,0.40)','transparent'],
-    start:{x:0.0,y:0.08}, end:{x:1.0,y:0.55}, opMin:0.18, opMax:0.85, drift:[-28,18], dur:7200, delay:0 },
-  { colors: ['transparent','rgba(60,100,255,0.55)','rgba(120,220,255,0.38)','transparent'],
-    start:{x:0.05,y:0.20}, end:{x:0.95,y:0.68}, opMin:0.15, opMax:0.72, drift:[20,-22], dur:9400, delay:1800 },
-  { colors: ['transparent','rgba(150,50,255,0.50)','rgba(80,210,255,0.32)','transparent'],
-    start:{x:0.12,y:0.06}, end:{x:0.88,y:0.60}, opMin:0.12, opMax:0.65, drift:[-15,30], dur:8100, delay:3400 },
-  { colors: ['transparent','rgba(0,255,140,0.45)','rgba(0,210,190,0.35)','transparent'],
-    start:{x:0.18,y:0.26}, end:{x:0.82,y:0.72}, opMin:0.20, opMax:0.78, drift:[12,-18], dur:10600, delay:900 },
-];
-
-function AuroraBackground() {
-  const anims = useRef(AURORA_BANDS.map(() => new Animated.Value(0))).current;
-
-  useEffect(() => {
-    const loops = AURORA_BANDS.map((band, i) => {
-      const steps: Animated.CompositeAnimation[] = [];
-      if (band.delay > 0) steps.push(Animated.delay(band.delay));
-      steps.push(Animated.timing(anims[i], { toValue: 1, duration: band.dur, useNativeDriver: true }));
-      steps.push(Animated.timing(anims[i], { toValue: 0, duration: band.dur, useNativeDriver: true }));
-      return Animated.loop(Animated.sequence(steps));
-    });
-    loops.forEach((l) => l.start());
-    return () => loops.forEach((l) => l.stop());
-  }, []);
-
-  return (
-    <View style={[StyleSheet.absoluteFill, { backgroundColor: '#020610' }]}>
-      <LinearGradient
-        colors={['#030816', '#060e24', '#040a18']}
-        locations={[0, 0.5, 1]}
-        style={StyleSheet.absoluteFill}
-      />
-      {AURORA_BANDS.map((band, i) => {
-        const opacity   = anims[i].interpolate({ inputRange:[0,1], outputRange:[band.opMin, band.opMax] });
-        const translateY = anims[i].interpolate({ inputRange:[0,1], outputRange:band.drift });
-        return (
-          <Animated.View key={i} style={[StyleSheet.absoluteFill, { opacity, transform:[{translateY}] }]}>
-            <LinearGradient
-              colors={band.colors as string[]}
-              start={band.start}
-              end={band.end}
-              style={StyleSheet.absoluteFill}
-            />
-          </Animated.View>
-        );
-      })}
-    </View>
-  );
-}
 
 // ── Sub-components ──────────────────────────────────────────────────────────────
 
@@ -380,7 +326,7 @@ export default function HomeScreen() {
 
 const s = StyleSheet.create({
   root:          { flex: 1, backgroundColor: '#020610' },
-  scrollContent: { paddingBottom: 120 },
+  scrollContent: { paddingBottom: 40 },
 
   // Hero
   hero: { width: '100%', position: 'relative' },

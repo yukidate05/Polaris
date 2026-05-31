@@ -6,6 +6,7 @@ import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { AuroraBackground } from '@components/ui';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer, type AudioStatus } from 'expo-audio';
 import { useBriefingStore } from '@stores/briefingStore';
 import { speechService, SPEECH_RATES, type SpeechRate } from '@services/speechService';
@@ -161,7 +162,7 @@ export default function PlayerScreen() {
 
   return (
     <View style={styles.bg}>
-      <LinearGradient colors={['#0D1117', '#1A1F2E', '#0F1520']} style={StyleSheet.absoluteFill} />
+      <AuroraBackground />
       <SafeAreaView style={styles.safe}>
 
         {/* Nav */}
