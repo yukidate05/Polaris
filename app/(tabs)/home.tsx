@@ -128,7 +128,7 @@ export default function HomeScreen() {
       }
 
       setStatus('generating_script');
-      const script = await briefingService.generate(data, firstName, [], hasPlayed);
+      const script = await briefingService.generate(data, firstName, [], hasPlayed, user?.uid ?? undefined);
       setScript(script);
     } catch (e: any) {
       setError(e?.message ?? 'Unknown error');
@@ -236,7 +236,7 @@ export default function HomeScreen() {
             <View style={styles.statsRow}>
               <StatChip
                 icon="mail-outline"
-                label="未読メール"
+                label="今日のメール"
                 value={`${unread}件`}
               />
               <StatChip

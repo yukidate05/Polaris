@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Animated,
 } from 'react-native';
@@ -7,13 +7,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer, type AudioStatus } from 'expo-audio';
-import { GradientBackground, PolarisOrb } from '@components/ui';
 import { useBriefingStore } from '@stores/briefingStore';
 import { speechService, SPEECH_RATES, type SpeechRate } from '@services/speechService';
 import { Colors } from '@constants/colors';
 import type { BriefingChapter } from '@services/briefingService';
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -23,87 +20,98 @@ function formatTime(sec: number): string {
 
 function chapterAtTime(chapters: BriefingChapter[], sec: number): BriefingChapter | null {
   let active: BriefingChapter | null = null;
-  for (const ch of chapters) {
-    if (sec >= ch.startSec) active = ch;
-  }
+  for (const ch of chapters) { if (sec >= ch.startSec) active = ch; }
   return active;
 }
-
-// ── Waveform bar ───────────────────────────────────────────────────────────────
-
-function WaveBar({ index, progress }: { index: number; progress: number }) {
-  const heights = [18, 28, 22, 36, 24, 40, 20, 32, 26, 44, 22, 38, 18, 30, 42, 24, 36, 20, 28, 16,
-                   34, 26, 44, 20, 38, 24, 32, 18, 42, 28, 36, 22, 40, 26, 34, 20, 28, 44, 18, 36];
-  const h      = heights[index % heights.length];
-  const active = index / 40 < progress;
-  return (
-    <View style={[styles.waveBar, { height: h }, active ? styles.waveBarActive : styles.waveBarInactive]} />
-  );
-}
-
-// ── Main Screen ────────────────────────────────────────────────────────────────
 
 export default function PlayerScreen() {
   const { script } = useBriefingStore();
 
-  // Playback state
   const [isPlaying,  setIsPlaying]  = useState(false);
   const [currentSec, setCurrentSec] = useState(0);
   const [totalSec,   setTotalSec]   = useState(script?.estimatedSeconds ?? 0);
   const [rate,       setRate]       = useState(1.0);
 
-  const playerRef  = useRef<AudioPlayer | null>(null);
-  const timerRef   = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isAudio    = !!script?.audioUri;
+  const playerRef = useRef<AudioPlayer | null>(null);
+  const timerRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isAudio   = !!script?.audioUri;
 
-  const progress       = totalSec > 0 ? currentSec / totalSec : 0;
-  const activeChapter  = script ? chapterAtTime(script.chapters, currentSec) : null;
+  const progress      = totalSec > 0 ? currentSec / totalSec : 0;
+  const activeChapter = script ? chapterAtTime(script.chapters, currentSec) : null;
 
-  // Setup audio or speech
+  // ── Dialogue turns with proportional timestamps ──────────────────────────────
+
+  const dialogueTurns = useMemo(() => {
+    const turns = script?.dialogue;
+    if (!turns?.length || totalSec === 0) return [];
+    const total = turns.reduce((s, t) => s + t.text.length, 0);
+    let cum = 0;
+    return turns.map((t) => {
+      const startSec = total > 0 ? (cum / total) * totalSec : 0;
+      cum += t.text.length;
+      return { ...t, startSec };
+    });
+  }, [script?.dialogue, totalSec]);
+
+  const activeTurnIdx = useMemo(() => {
+    if (!dialogueTurns.length) return -1;
+    let idx = 0;
+    for (let i = 0; i < dialogueTurns.length; i++) {
+      if (currentSec >= dialogueTurns[i].startSec) idx = i;
+      else break;
+    }
+    return idx;
+  }, [currentSec, dialogueTurns]);
+
+  const prevTurn = activeTurnIdx > 0 ? dialogueTurns[activeTurnIdx - 1] : null;
+  const currTurn = activeTurnIdx >= 0 ? dialogueTurns[activeTurnIdx] : null;
+  const nextTurn = activeTurnIdx >= 0 && activeTurnIdx < dialogueTurns.length - 1
+    ? dialogueTurns[activeTurnIdx + 1] : null;
+
+  // ── Fade animation on turn change ────────────────────────────────────────────
+
+  const fadeAnim   = useRef(new Animated.Value(1)).current;
+  const prevIdxRef = useRef(activeTurnIdx);
+
+  useEffect(() => {
+    if (prevIdxRef.current === activeTurnIdx) return;
+    prevIdxRef.current = activeTurnIdx;
+    Animated.sequence([
+      Animated.timing(fadeAnim, { toValue: 0.35, duration: 130, useNativeDriver: true }),
+      Animated.timing(fadeAnim, { toValue: 1,    duration: 200, useNativeDriver: true }),
+    ]).start();
+  }, [activeTurnIdx]);
+
+  // ── Audio setup ──────────────────────────────────────────────────────────────
+
   useEffect(() => {
     if (!script) return;
-
-    if (isAudio) {
-      setupAudioPlayer(script.audioUri!);
-    } else {
-      startSpeech();
-    }
-
+    if (isAudio) setupAudioPlayer(script.audioUri!);
+    else startSpeech();
     return () => cleanup();
   }, []);
 
   async function setupAudioPlayer(uri: string) {
     await setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: true });
-    const p = createAudioPlayer({ uri }, { updateInterval: 500 });
+    const p = createAudioPlayer({ uri }, { updateInterval: 250 });
     playerRef.current = p;
-
     p.addListener('playbackStatusUpdate', (status: AudioStatus) => {
       setCurrentSec(status.currentTime ?? 0);
       if (status.duration) setTotalSec(status.duration);
       setIsPlaying(status.playing);
-      if (status.didJustFinish) {
-        setIsPlaying(false);
-        setCurrentSec(0);
-      }
+      if (status.didJustFinish) { setIsPlaying(false); setCurrentSec(0); }
     });
-
     p.play();
     setIsPlaying(true);
   }
 
   async function startSpeech() {
     if (!script) return;
-    setIsPlaying(true);
-    setCurrentSec(0);
-    setTotalSec(script.estimatedSeconds);
-
-    // Track progress via timer (expo-speech has no position callback)
+    setIsPlaying(true); setCurrentSec(0); setTotalSec(script.estimatedSeconds);
     const startTime = Date.now();
     timerRef.current = setInterval(() => {
-      const elapsed = (Date.now() - startTime) / 1000 / rate;
-      setCurrentSec(Math.min(elapsed, script.estimatedSeconds));
-    }, 300);
-
+      setCurrentSec(Math.min((Date.now() - startTime) / 1000 / rate, script.estimatedSeconds));
+    }, 250);
     await speechService.speak(script.fullText, rate as SpeechRate, {
       onDone:  () => { setIsPlaying(false); clearInterval(timerRef.current!); },
       onError: () => { setIsPlaying(false); clearInterval(timerRef.current!); },
@@ -111,57 +119,34 @@ export default function PlayerScreen() {
   }
 
   function cleanup() {
-    if (playerRef.current) {
-      playerRef.current.pause();
-      playerRef.current.remove();
-      playerRef.current = null;
-    }
+    if (playerRef.current) { playerRef.current.pause(); playerRef.current.remove(); playerRef.current = null; }
     clearInterval(timerRef.current!);
     speechService.stop();
   }
 
   const handlePlayPause = useCallback(async () => {
     if (isAudio && playerRef.current) {
-      if (isPlaying) {
-        playerRef.current.pause();
-      } else {
-        playerRef.current.play();
-      }
+      isPlaying ? playerRef.current.pause() : playerRef.current.play();
     } else {
-      if (isPlaying) {
-        await speechService.stop();
-        clearInterval(timerRef.current!);
-        setIsPlaying(false);
-      } else {
-        await startSpeech();
-      }
+      if (isPlaying) { await speechService.stop(); clearInterval(timerRef.current!); setIsPlaying(false); }
+      else await startSpeech();
     }
   }, [isPlaying, isAudio]);
 
   const handleSkip = useCallback(async (deltaSec: number) => {
-    if (isAudio && playerRef.current) {
-      const newPos = Math.max(0, Math.min(currentSec + deltaSec, totalSec));
-      await playerRef.current.seekTo(newPos);
-    }
+    if (isAudio && playerRef.current)
+      await playerRef.current.seekTo(Math.max(0, Math.min(currentSec + deltaSec, totalSec)));
   }, [isAudio, currentSec, totalSec]);
 
-  const handleBack = useCallback(async () => {
-    cleanup();
-    router.back();
-  }, []);
-
   async function cycleRate() {
-    const idx     = SPEECH_RATES.indexOf(rate as SpeechRate);
-    const newRate = SPEECH_RATES[(idx + 1) % SPEECH_RATES.length];
+    const newRate = SPEECH_RATES[(SPEECH_RATES.indexOf(rate as SpeechRate) + 1) % SPEECH_RATES.length];
     setRate(newRate);
-    if (isAudio && playerRef.current) {
-      playerRef.current.setPlaybackRate(newRate);
-    }
+    if (isAudio && playerRef.current) playerRef.current.setPlaybackRate(newRate);
   }
 
   if (!script) {
     return (
-      <GradientBackground>
+      <View style={styles.bg}>
         <SafeAreaView style={styles.safe}>
           <View style={styles.empty}>
             <Text style={styles.emptyText}>ホーム画面からブリーフィングを生成してください</Text>
@@ -170,17 +155,19 @@ export default function PlayerScreen() {
             </TouchableOpacity>
           </View>
         </SafeAreaView>
-      </GradientBackground>
+      </View>
     );
   }
 
   return (
-    <GradientBackground>
+    <View style={styles.bg}>
+      <LinearGradient colors={['#0D1117', '#1A1F2E', '#0F1520']} style={StyleSheet.absoluteFill} />
       <SafeAreaView style={styles.safe}>
+
         {/* Nav */}
         <View style={styles.nav}>
-          <TouchableOpacity onPress={handleBack} style={styles.navBtn}>
-            <Ionicons name="chevron-down" size={26} color={Colors.text.primary} />
+          <TouchableOpacity onPress={() => { cleanup(); router.back(); }} style={styles.navBtn}>
+            <Ionicons name="chevron-down" size={26} color="rgba(255,255,255,0.8)" />
           </TouchableOpacity>
           <View style={styles.navCenter}>
             <Text style={styles.navTitle}>Daily Brief</Text>
@@ -189,40 +176,51 @@ export default function PlayerScreen() {
             </Text>
           </View>
           <TouchableOpacity style={styles.navBtn}>
-            <Ionicons name="ellipsis-horizontal" size={22} color={Colors.text.secondary} />
+            <Ionicons name="ellipsis-horizontal" size={22} color="rgba(255,255,255,0.5)" />
           </TouchableOpacity>
         </View>
 
-        <ScrollView
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Orb */}
-          <View style={styles.orbWrap}>
-            <PolarisOrb size={160} animate={isPlaying} />
+        {/* ── 3-slot subtitle area ─────────────────────────────────────── */}
+        <View style={styles.subtitleArea}>
+
+          {/* Prev turn — dim, top */}
+          <View style={styles.prevSlot}>
+            {prevTurn ? (
+              <Text style={styles.prevText} numberOfLines={5}>{prevTurn.text}</Text>
+            ) : null}
           </View>
 
-          {/* Voice label */}
+          {/* Current turn — bright, center */}
+          <Animated.View style={[styles.currSlot, { opacity: fadeAnim }]}>
+            {currTurn ? (
+              <>
+                <View style={styles.activeDot} />
+                <Text style={styles.currText}>{currTurn.text}</Text>
+              </>
+            ) : null}
+          </Animated.View>
+
+          {/* Next turn — dim, bottom */}
+          <View style={styles.nextSlot}>
+            {nextTurn ? (
+              <>
+                <View style={styles.inactiveDot} />
+                <Text style={styles.nextText} numberOfLines={5}>{nextTurn.text}</Text>
+              </>
+            ) : null}
+          </View>
+
+          {/* Edge fades */}
+          <LinearGradient colors={['rgba(13,17,23,1)', 'rgba(13,17,23,0)']} style={styles.fadeTop}    pointerEvents="none" />
+          <LinearGradient colors={['rgba(13,17,23,0)', 'rgba(13,17,23,1)']} style={styles.fadeBottom} pointerEvents="none" />
+        </View>
+
+        {/* ── Bottom controls ──────────────────────────────────────────── */}
+        <View style={styles.bottomPanel}>
+
           <View style={styles.voiceRow}>
-            <Ionicons name="sparkles" size={12} color={Colors.brand.primary} />
-            <Text style={styles.voiceLabel}>
-              {isAudio ? 'AI Voice • Polaris' : '音声合成 • Polaris'}
-            </Text>
-          </View>
-
-          {/* Title */}
-          <View style={styles.titleArea}>
-            <Text style={styles.trackTitle}>{script.topic}</Text>
-            {activeChapter && (
-              <Text style={styles.trackSub}>{activeChapter.text.slice(0, 60)}...</Text>
-            )}
-          </View>
-
-          {/* Waveform */}
-          <View style={styles.waveform}>
-            {Array.from({ length: 40 }, (_, i) => (
-              <WaveBar key={i} index={i} progress={progress} />
-            ))}
+            <Ionicons name="sparkles" size={11} color={Colors.brand.primary} />
+            <Text style={styles.voiceLabel}>AI Voice • Polaris</Text>
           </View>
 
           {/* Progress */}
@@ -236,8 +234,8 @@ export default function PlayerScreen() {
             </View>
           </View>
 
-          {/* Chapter tabs */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chapScroll}>
+          {/* Chapter chips */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View style={styles.chapRow}>
               {script.chapters.map((ch) => {
                 const active = activeChapter?.id === ch.id;
@@ -245,237 +243,121 @@ export default function PlayerScreen() {
                   <TouchableOpacity
                     key={ch.id}
                     style={[styles.chapChip, active && styles.chapChipActive]}
-                    onPress={() => {
-                      if (isAudio && playerRef.current) {
-                        playerRef.current.seekTo(ch.startSec);
-                      }
-                    }}
+                    onPress={() => { if (isAudio && playerRef.current) playerRef.current.seekTo(ch.startSec); }}
                   >
-                    <Ionicons
-                      name={ch.iconName as any}
-                      size={11}
-                      color={active ? '#fff' : Colors.text.secondary}
-                    />
-                    <Text style={[styles.chapText, active && styles.chapTextActive]}>
-                      {ch.title}
-                    </Text>
-                    <Text style={[styles.chapTime, active && styles.chapTimeActive]}>
-                      {formatTime(ch.startSec)}
-                    </Text>
+                    <Ionicons name={ch.iconName as any} size={11} color={active ? '#fff' : 'rgba(255,255,255,0.45)'} />
+                    <Text style={[styles.chapText, active && styles.chapTextActive]}>{ch.title}</Text>
+                    <Text style={[styles.chapTime, active && styles.chapTimeActive]}>{formatTime(ch.startSec)}</Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
           </ScrollView>
 
-          {/* Controls */}
+          {/* Playback controls */}
           <View style={styles.controls}>
-            {/* Speed */}
             <TouchableOpacity onPress={cycleRate} style={styles.sideControl}>
               <Text style={styles.rateText}>{rate}x</Text>
             </TouchableOpacity>
-
-            {/* Skip back 15 */}
             <TouchableOpacity onPress={() => handleSkip(-15)} style={styles.skipBtn}>
-              <Ionicons name="play-back" size={20} color={Colors.text.secondary} />
+              <Ionicons name="play-back" size={20} color="rgba(255,255,255,0.6)" />
               <Text style={styles.skipLabel}>15</Text>
             </TouchableOpacity>
-
-            {/* Play / Pause */}
             <TouchableOpacity onPress={handlePlayPause} style={styles.playBtn} activeOpacity={0.85}>
-              <Ionicons
-                name={isPlaying ? 'pause' : 'play'}
-                size={32}
-                color="#fff"
-                style={!isPlaying ? { marginLeft: 4 } : undefined}
-              />
+              <Ionicons name={isPlaying ? 'pause' : 'play'} size={30} color="#fff"
+                style={!isPlaying ? { marginLeft: 4 } : undefined} />
             </TouchableOpacity>
-
-            {/* Skip forward 15 */}
             <TouchableOpacity onPress={() => handleSkip(15)} style={styles.skipBtn}>
-              <Ionicons name="play-forward" size={20} color={Colors.text.secondary} />
+              <Ionicons name="play-forward" size={20} color="rgba(255,255,255,0.6)" />
               <Text style={styles.skipLabel}>15</Text>
             </TouchableOpacity>
-
-            {/* Save */}
             <TouchableOpacity style={styles.sideControl}>
-              <Ionicons name="bookmark-outline" size={22} color={Colors.text.secondary} />
+              <Ionicons name="bookmark-outline" size={22} color="rgba(255,255,255,0.5)" />
             </TouchableOpacity>
           </View>
 
-          {/* Bottom actions */}
-          <View style={styles.bottomActions}>
-            <TouchableOpacity style={styles.actionChip}>
-              <Ionicons name="list-outline" size={14} color={Colors.text.secondary} />
-              <Text style={styles.actionChipText}>ソース</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.actionChip}>
-              <Ionicons name="albums-outline" size={14} color={Colors.text.secondary} />
-              <Text style={styles.actionChipText}>チャプター</Text>
-            </TouchableOpacity>
-          </View>
-
-        </ScrollView>
+        </View>
       </SafeAreaView>
-    </GradientBackground>
+    </View>
   );
 }
 
-// ── Styles ─────────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
-  safe:  { flex: 1 },
+  bg:   { flex: 1, backgroundColor: '#0D1117' },
+  safe: { flex: 1 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 },
-  emptyText: { fontSize: 15, color: Colors.text.secondary, textAlign: 'center' },
-  emptyBtn:  { backgroundColor: Colors.brand.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 20 },
+  emptyText:    { fontSize: 15, color: 'rgba(255,255,255,0.6)', textAlign: 'center' },
+  emptyBtn:     { backgroundColor: Colors.brand.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 20 },
   emptyBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
 
-  nav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-  },
+  nav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 12 },
   navBtn:    { width: 40, alignItems: 'center' },
   navCenter: { alignItems: 'center', gap: 2 },
-  navTitle:  { fontSize: 15, fontWeight: '700', color: Colors.text.primary },
-  navSub:    { fontSize: 11, color: Colors.text.tertiary, fontWeight: '500' },
+  navTitle:  { fontSize: 15, fontWeight: '700', color: '#fff' },
+  navSub:    { fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: '500' },
 
-  content: {
+  // Subtitle 3-slot
+  subtitleArea: { flex: 1, position: 'relative' },
+
+  prevSlot: {
+    flex: 1,
+    justifyContent: 'flex-end',
     paddingHorizontal: 28,
-    paddingBottom: 40,
-    gap: 20,
-    alignItems: 'center',
+    paddingBottom: 28,
+    opacity: 0.28,
   },
+  prevText: { fontSize: 17, color: '#fff', lineHeight: 26 },
 
-  // Orb
-  orbWrap: { height: 200, alignItems: 'center', justifyContent: 'center' },
-
-  // Voice label
-  voiceRow:  { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  voiceLabel:{ fontSize: 12, color: Colors.brand.primary, fontWeight: '600' },
-
-  // Title
-  titleArea: { alignItems: 'center', gap: 6, width: '100%' },
-  trackTitle:{ fontSize: 22, fontWeight: '800', color: Colors.text.primary, letterSpacing: -0.5, textAlign: 'center' },
-  trackSub:  { fontSize: 13, color: Colors.text.secondary, textAlign: 'center', lineHeight: 19 },
-
-  // Waveform
-  waveform: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    width: '100%',
-    height: 50,
+  currSlot: {
+    flex: 1.2,
     justifyContent: 'center',
+    paddingHorizontal: 28,
+    gap: 12,
   },
-  waveBar: { width: 3, borderRadius: 2 },
-  waveBarActive:   { backgroundColor: '#EF7F7F' },
-  waveBarInactive: { backgroundColor: 'rgba(107,140,255,0.20)' },
+  activeDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.brand.primary },
+  currText:   { fontSize: 22, fontWeight: '700', color: '#fff', lineHeight: 34 },
 
-  // Progress
-  progressSection: { width: '100%', gap: 8 },
-  progressTrack: {
-    width: '100%',
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(107,140,255,0.15)',
-    overflow: 'hidden',
+  nextSlot: {
+    flex: 1,
+    paddingHorizontal: 28,
+    paddingTop: 28,
+    opacity: 0.28,
+    gap: 10,
   },
-  progressFill: {
-    height: '100%',
-    borderRadius: 2,
-    backgroundColor: Colors.brand.primary,
-  },
-  timeRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  timeText: { fontSize: 11, color: Colors.text.tertiary, fontWeight: '500' },
+  inactiveDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.4)' },
+  nextText:    { fontSize: 17, color: '#fff', lineHeight: 26 },
 
-  // Chapter tabs
-  chapScroll: { width: '100%' },
-  chapRow: { flexDirection: 'row', gap: 8, paddingVertical: 2 },
-  chapChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 16,
-    backgroundColor: 'rgba(0,0,0,0.05)',
-  },
+  fadeTop:    { position: 'absolute', top: 0, left: 0, right: 0, height: 70 },
+  fadeBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 70 },
+
+  // Bottom panel
+  bottomPanel: { paddingHorizontal: 20, paddingBottom: 8, gap: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' },
+  voiceRow:   { flexDirection: 'row', alignItems: 'center', gap: 5, paddingTop: 10 },
+  voiceLabel: { fontSize: 11, color: Colors.brand.primary, fontWeight: '600' },
+
+  progressSection: { gap: 6 },
+  progressTrack:   { width: '100%', height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
+  progressFill:    { height: '100%', borderRadius: 2, backgroundColor: Colors.brand.primary },
+  timeRow:         { flexDirection: 'row', justifyContent: 'space-between' },
+  timeText:        { fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: '500' },
+
+  chapRow:        { flexDirection: 'row', gap: 8, paddingVertical: 2 },
+  chapChip:       { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.07)' },
   chapChipActive: { backgroundColor: Colors.brand.primary },
-  chapText: { fontSize: 11, color: Colors.text.secondary, fontWeight: '500' },
+  chapText:       { fontSize: 11, color: 'rgba(255,255,255,0.45)', fontWeight: '500' },
   chapTextActive: { color: '#fff', fontWeight: '600' },
-  chapTime: { fontSize: 10, color: Colors.text.tertiary },
+  chapTime:       { fontSize: 10, color: 'rgba(255,255,255,0.3)' },
   chapTimeActive: { color: 'rgba(255,255,255,0.80)' },
 
-  // Controls
-  controls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 20,
-    width: '100%',
-  },
-  sideControl: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  skipBtn: {
-    width: 48,
-    height: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  skipLabel: {
-    fontSize: 8,
-    fontWeight: '700',
-    color: Colors.text.tertiary,
-    position: 'absolute',
-    bottom: 6,
-  },
+  controls:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 20 },
+  sideControl: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  skipBtn:     { width: 48, height: 48, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  skipLabel:   { fontSize: 8, fontWeight: '700', color: 'rgba(255,255,255,0.4)', position: 'absolute', bottom: 6 },
   playBtn: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 68, height: 68, borderRadius: 34,
     backgroundColor: Colors.brand.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: Colors.brand.primary,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.40,
-    shadowRadius: 16,
-    elevation: 8,
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: Colors.brand.primary, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 8,
   },
-  rateText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.text.secondary,
-  },
-
-  // Bottom actions
-  bottomActions: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 4,
-  },
-  actionChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.06)',
-  },
-  actionChipText: {
-    fontSize: 13,
-    color: Colors.text.secondary,
-    fontWeight: '500',
-  },
+  rateText: { fontSize: 14, fontWeight: '700', color: 'rgba(255,255,255,0.6)' },
 });
