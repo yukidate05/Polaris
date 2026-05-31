@@ -1,6 +1,10 @@
 import type { GoogleData } from './googleDataService';
-import { claudeService, type ChapterDraft } from './claudeService';
+import { claudeService, type ChapterDraft, type DialogueTurn } from './claudeService';
+import { geminiTtsService } from './geminiTtsService';
 import { googleTtsService } from './googleTtsService';
+import { memoryService } from './memoryService';
+
+export type { DialogueTurn };
 
 export interface BriefingChapter {
   id:       string;
@@ -16,6 +20,7 @@ export interface BriefingScript {
   estimatedSeconds: number;
   audioUri:         string | null;
   topic:            string;
+  dialogue:         DialogueTurn[];
 }
 
 function todayString(): string {
@@ -88,8 +93,12 @@ export const briefingService = {
     userName:    string,
     interests:   string[] = [],
     isReturning: boolean  = false,
+    uid?:        string,
   ): Promise<BriefingScript> {
     const currentHour = new Date().getHours();
+
+    // 記憶を並行読み込み
+    const userContext = uid ? await memoryService.getContext(uid).catch(() => null) : null;
 
     let rawChapters: ChapterDraft[];
     try {
@@ -102,6 +111,7 @@ export const briefingService = {
         interests,
         currentHour,
         isReturning,
+        userContext,
       });
       rawChapters = result.chapters;
     } catch (err) {
@@ -129,15 +139,30 @@ export const briefingService = {
     let audioUri: string | null = null;
     try {
       audioUri = allDialogue.length > 0
-        ? await googleTtsService.generateDialogueAudio(allDialogue)
+        ? await geminiTtsService.generateDialogueAudio(allDialogue)
         : await googleTtsService.generateAudio(fullText);
     } catch (err) {
-      console.error('[briefing] TTS failed:', err);
-      audioUri = null;
+      console.error('[briefing] Gemini TTS failed, falling back to Google TTS:', err);
+      try {
+        audioUri = allDialogue.length > 0
+          ? await googleTtsService.generateDialogueAudio(allDialogue)
+          : await googleTtsService.generateAudio(fullText);
+      } catch (err2) {
+        console.error('[briefing] TTS fallback also failed:', err2);
+        audioUri = null;
+      }
     }
 
     console.log('[briefing] audioUri:', audioUri);
-    return { fullText, chapters, estimatedSeconds, audioUri, topic: '今日のブリーフィング' };
+
+    // 記憶を非同期で更新（ブリーフィング返却をブロックしない）
+    if (uid) {
+      memoryService.extractAndSave(uid, data, userContext).catch((e) =>
+        console.error('[memory] background update failed:', e)
+      );
+    }
+
+    return { fullText, chapters, estimatedSeconds, audioUri, topic: '今日のブリーフィング', dialogue: allDialogue };
   },
 
   async generateDeepcast(topic: string): Promise<BriefingScript> {
@@ -160,12 +185,19 @@ export const briefingService = {
     let audioUri: string | null = null;
     try {
       audioUri = allDialogue.length > 0
-        ? await googleTtsService.generateDialogueAudio(allDialogue)
+        ? await geminiTtsService.generateDialogueAudio(allDialogue)
         : await googleTtsService.generateAudio(fullText);
-    } catch {
-      audioUri = null;
+    } catch (err) {
+      console.error('[deepcast] Gemini TTS failed, falling back:', err);
+      try {
+        audioUri = allDialogue.length > 0
+          ? await googleTtsService.generateDialogueAudio(allDialogue)
+          : await googleTtsService.generateAudio(fullText);
+      } catch {
+        audioUri = null;
+      }
     }
 
-    return { fullText, chapters, estimatedSeconds, audioUri, topic };
+    return { fullText, chapters, estimatedSeconds, audioUri, topic, dialogue: allDialogue };
   },
 };

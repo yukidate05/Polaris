@@ -79,6 +79,7 @@ export const claudeService = {
     interests:      string[];
     currentHour:    number;
     isReturning:    boolean;
+    userContext?:   import('./memoryService').UserContext | null;
   }): Promise<ClaudeBriefingResult> {
     const today    = new Date();
     const dayNames = ['日曜日','月曜日','火曜日','水曜日','木曜日','金曜日','土曜日'];
@@ -97,6 +98,17 @@ export const claudeService = {
       ? `${params.userName}さんは本日すでにブリーフィングを聴いており、また戻ってきました。openingの最初のセリフはAriaが「お帰り、${params.userName}！また来てくれたね」から始めてください。`
       : `openingの最初のセリフはAriaが「${tc}。今日は${dateStr}、${params.userName}のモーニングポッドキャストへようこそ！」から始めてください。`;
 
+    const ctx = params.userContext;
+    const contextBlock = ctx ? `
+【${params.userName}さんについての記憶（過去のブリーフィングから蓄積）】
+推定の役割・職種: ${ctx.inferredRole || '不明'}
+${ctx.frequentContacts.length > 0 ? `よく連絡を取る人:\n${ctx.frequentContacts.slice(0, 5).map(c => `・${c.name}（最近のトピック: ${c.recentTopics.slice(0,3).join('、')}）`).join('\n')}` : ''}
+${ctx.recentTopics.length > 0 ? `最近のトピック: ${ctx.recentTopics.slice(0, 8).join('、')}` : ''}
+${ctx.pendingFollowups.length > 0 ? `フォローアップ候補:\n${ctx.pendingFollowups.slice(0, 3).map(f => `・${f.contact}への「${f.topic}」（${f.since}以降）`).join('\n')}` : ''}
+
+この記憶を自然にブリーフィングへ織り込んでください。全部使う必要はなく、今日の内容と関連するものだけ言及してください。
+` : '';
+
     const prompt = `${params.userName}さんのためのポッドキャストブリーフィングを、2人のMCの対話形式で日本語生成してください。
 
 MCの設定:
@@ -104,9 +116,9 @@ MCの設定:
 - Kai（B）：落ち着いて知的な男性MC。Ariaの発言を深める
 
 ${returningNote}
-
+${contextBlock}
 今日: ${dateStr}
-未読メール: ${params.unreadCount}件
+今日のメール: ${params.unreadCount}件
 主なメール:
 ${emailLines}
 
@@ -126,10 +138,10 @@ JSONのみを返してください:
       "title": "おはよう",
       "iconName": "sunny-outline",
       "dialogue": [
-        {"speaker": "A", "text": "Ariaのセリフ（60〜100字）"},
-        {"speaker": "B", "text": "Kaiのセリフ（60〜100字）"},
-        {"speaker": "A", "text": "..."},
-        {"speaker": "B", "text": "..."}
+        {"speaker": "A", "text": "Ariaのセリフ（80〜120字）"},
+        {"speaker": "B", "text": "Kaiのセリフ（80〜120字）"},
+        {"speaker": "A", "text": "80〜120字のセリフ"},
+        {"speaker": "B", "text": "80〜120字のセリフ"}
       ]
     },
     {
@@ -137,10 +149,11 @@ JSONのみを返してください:
       "title": "メール",
       "iconName": "mail-outline",
       "dialogue": [
-        {"speaker": "A", "text": "メール紹介（60〜100字）"},
-        {"speaker": "B", "text": "コメント（60〜100字）"},
-        {"speaker": "A", "text": "..."},
-        {"speaker": "B", "text": "..."}
+        {"speaker": "A", "text": "メール紹介（80〜120字）"},
+        {"speaker": "B", "text": "コメント（80〜120字）"},
+        {"speaker": "A", "text": "80〜120字のセリフ"},
+        {"speaker": "B", "text": "80〜120字のセリフ"},
+        {"speaker": "A", "text": "80〜120字のセリフ"}
       ]
     },
     {
@@ -148,10 +161,11 @@ JSONのみを返してください:
       "title": "予定",
       "iconName": "calendar-outline",
       "dialogue": [
-        {"speaker": "B", "text": "今日の予定紹介（60〜100字）"},
-        {"speaker": "A", "text": "コメント（60〜100字）"},
-        {"speaker": "B", "text": "..."},
-        {"speaker": "A", "text": "..."}
+        {"speaker": "B", "text": "今日の予定紹介（80〜120字）"},
+        {"speaker": "A", "text": "コメント（80〜120字）"},
+        {"speaker": "B", "text": "80〜120字のセリフ"},
+        {"speaker": "A", "text": "80〜120字のセリフ"},
+        {"speaker": "B", "text": "80〜120字のセリフ"}
       ]
     },
     {
@@ -159,10 +173,11 @@ JSONのみを返してください:
       "title": "インサイト",
       "iconName": "bulb-outline",
       "dialogue": [
-        {"speaker": "A", "text": "明日の予定や興味への洞察（60〜100字）"},
-        {"speaker": "B", "text": "深掘り（60〜100字）"},
-        {"speaker": "A", "text": "..."},
-        {"speaker": "B", "text": "..."}
+        {"speaker": "A", "text": "明日の予定や興味への洞察（80〜120字）"},
+        {"speaker": "B", "text": "深掘り（80〜120字）"},
+        {"speaker": "A", "text": "80〜120字のセリフ"},
+        {"speaker": "B", "text": "80〜120字のセリフ"},
+        {"speaker": "A", "text": "80〜120字のセリフ"}
       ]
     },
     {
@@ -170,16 +185,19 @@ JSONのみを返してください:
       "title": "締め",
       "iconName": "checkmark-circle-outline",
       "dialogue": [
-        {"speaker": "B", "text": "今日の締め（60〜100字）"},
-        {"speaker": "A", "text": "励ましの言葉（60〜100字）"}
+        {"speaker": "B", "text": "今日の締め（80〜120字）"},
+        {"speaker": "A", "text": "励ましの言葉（80〜120字）"},
+        {"speaker": "B", "text": "80〜120字のセリフ"},
+        {"speaker": "A", "text": "締めのセリフ（80〜120字）"}
       ]
     }
   ]
 }
 
 制約:
-- 各chapterは4〜5往復の対話（計約300字）
-- 全体で約1500字（5分間）
+- 各セリフは必ず80字以上120字以下（厳守）
+- 各chapterは4〜5セリフの対話（計約350字）
+- 全体で約1800字（6分）
 - 話し言葉のみ。記号・箇条書き禁止
 - ${params.userName}さんへの直接語りかけを自然に混ぜる
 - Ariaは「〜だよ」「〜だね」、Kaiは「〜ですね」「〜でしょう」の語尾`;

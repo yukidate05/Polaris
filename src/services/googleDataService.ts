@@ -81,12 +81,18 @@ interface GmailMessageResponse {
 }
 
 async function fetchEmails(token: string): Promise<{ unreadCount: number; topEmails: EmailSummary[] }> {
+  // 当日受信 + メインタブのみ（プロモ・迷惑メール除外）
+  const today = new Date();
+  const dateStr = `${today.getFullYear()}/${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}`;
+  const q = encodeURIComponent(`after:${dateStr} category:primary`);
+
   const list = await gGet<GmailListResponse>(
-    `${GMAIL_BASE}/messages?maxResults=10&q=is%3Aunread&fields=messages(id),resultSizeEstimate`,
+    `${GMAIL_BASE}/messages?maxResults=50&q=${q}&fields=messages(id),resultSizeEstimate`,
     token
   );
 
-  const unreadCount = list.resultSizeEstimate ?? 0;
+  console.log('[gmail] today emails:', list.messages?.length);
+  const unreadCount = list.messages?.length ?? 0;
   const messages = list.messages ?? [];
 
   const topEmails: EmailSummary[] = [];
