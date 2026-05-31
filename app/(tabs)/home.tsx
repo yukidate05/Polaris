@@ -54,54 +54,54 @@ const DISCOVER_CARDS = [
 function SunriseBackground() {
   return (
     <View style={StyleSheet.absoluteFill}>
-      {/* Base vertical color zones — top:gray-lavender → maroon → red → orange → gold */}
+      {/* Base vertical zones: warm gray → muted mauve → dark maroon → red → orange → gold */}
       <LinearGradient
-        colors={['#9B8898', '#5E3C58', '#5A2232', '#8A2420', '#C24418', '#D26E0C', '#C8900A']}
-        locations={[0, 0.16, 0.32, 0.50, 0.66, 0.83, 1]}
+        colors={['#A09098', '#806070', '#5E3040', '#742830', '#A83A1C', '#CC580C', '#CC7E08']}
+        locations={[0, 0.18, 0.32, 0.46, 0.60, 0.78, 1]}
         style={StyleSheet.absoluteFill}
       />
 
-      {/* Horizontal streak layers — simulate motion-blur streaks of a real sunset photo */}
-      {/* Gray-lavender zone streaks */}
-      <LinearGradient colors={['transparent','rgba(170,145,160,0.42)','rgba(155,128,148,0.30)','transparent']}
+      {/* ── Horizontal motion-streak layers ── */}
+      {/* Warm gray top zone */}
+      <LinearGradient colors={['transparent','rgba(175,155,162,0.45)','rgba(160,138,148,0.32)','transparent']}
         start={{x:0,y:0}} end={{x:1,y:0}}
-        style={{position:'absolute',top:'4%',left:0,right:0,height:'5%'}} />
-      <LinearGradient colors={['transparent','rgba(140,110,130,0.35)','transparent']}
-        start={{x:0.12,y:0}} end={{x:0.88,y:0}}
-        style={{position:'absolute',top:'10%',left:0,right:0,height:'3%'}} />
-      <LinearGradient colors={['rgba(110,80,100,0.20)','rgba(130,100,120,0.40)','rgba(110,80,100,0.20)']}
+        style={{position:'absolute',top:'3%',left:0,right:0,height:'4%'}} />
+      <LinearGradient colors={['rgba(148,125,138,0.22)','rgba(165,142,154,0.42)','transparent']}
+        start={{x:0.08,y:0}} end={{x:1,y:0}}
+        style={{position:'absolute',top:'8%',left:0,right:0,height:'3%'}} />
+      <LinearGradient colors={['transparent','rgba(155,132,144,0.38)','rgba(140,118,130,0.28)','transparent']}
         start={{x:0,y:0}} end={{x:1,y:0}}
-        style={{position:'absolute',top:'16%',left:0,right:0,height:'4%'}} />
+        style={{position:'absolute',top:'14%',left:0,right:0,height:'4%'}} />
 
-      {/* Maroon zone streaks */}
-      <LinearGradient colors={['transparent','rgba(100,40,55,0.50)','rgba(90,32,45,0.38)','transparent']}
+      {/* Muted mauve zone */}
+      <LinearGradient colors={['transparent','rgba(115,75,88,0.48)','rgba(100,62,76,0.36)','transparent']}
         start={{x:0.05,y:0}} end={{x:0.95,y:0}}
-        style={{position:'absolute',top:'24%',left:0,right:0,height:'4%'}} />
-      <LinearGradient colors={['rgba(80,28,38,0.22)','rgba(105,36,48,0.48)','transparent']}
+        style={{position:'absolute',top:'22%',left:0,right:0,height:'4%'}} />
+      <LinearGradient colors={['rgba(88,52,65,0.20)','rgba(112,70,84,0.46)','transparent']}
         start={{x:0,y:0}} end={{x:1,y:0}}
-        style={{position:'absolute',top:'30%',left:0,right:0,height:'3%'}} />
+        style={{position:'absolute',top:'29%',left:0,right:0,height:'3%'}} />
 
-      {/* Red zone streaks */}
-      <LinearGradient colors={['transparent','rgba(160,45,30,0.52)','rgba(145,38,24,0.40)','transparent']}
+      {/* Dark maroon → red zone */}
+      <LinearGradient colors={['transparent','rgba(155,48,35,0.52)','rgba(140,40,28,0.40)','transparent']}
         start={{x:0,y:0}} end={{x:1,y:0}}
-        style={{position:'absolute',top:'38%',left:0,right:0,height:'5%'}} />
-      <LinearGradient colors={['rgba(130,35,22,0.28)','rgba(165,48,30,0.55)','rgba(130,35,22,0.28)']}
-        start={{x:0.08,y:0}} end={{x:0.92,y:0}}
-        style={{position:'absolute',top:'46%',left:0,right:0,height:'3%'}} />
+        style={{position:'absolute',top:'37%',left:0,right:0,height:'5%'}} />
+      <LinearGradient colors={['rgba(122,34,24,0.25)','rgba(158,48,32,0.54)','rgba(122,34,24,0.25)']}
+        start={{x:0.06,y:0}} end={{x:0.94,y:0}}
+        style={{position:'absolute',top:'44%',left:0,right:0,height:'3%'}} />
 
-      {/* Orange zone streaks */}
-      <LinearGradient colors={['transparent','rgba(210,90,22,0.55)','rgba(195,78,16,0.42)','transparent']}
+      {/* Orange zone */}
+      <LinearGradient colors={['transparent','rgba(215,95,18,0.55)','rgba(198,80,12,0.42)','transparent']}
         start={{x:0,y:0}} end={{x:1,y:0}}
-        style={{position:'absolute',top:'55%',left:0,right:0,height:'6%'}} />
-      <LinearGradient colors={['rgba(195,75,15,0.30)','rgba(225,105,25,0.58)','rgba(195,75,15,0.30)']}
-        start={{x:0.05,y:0}} end={{x:0.95,y:0}}
-        style={{position:'absolute',top:'63%',left:0,right:0,height:'4%'}} />
+        style={{position:'absolute',top:'54%',left:0,right:0,height:'5%'}} />
+      <LinearGradient colors={['rgba(198,78,10,0.28)','rgba(228,108,20,0.58)','rgba(198,78,10,0.28)']}
+        start={{x:0.04,y:0}} end={{x:0.96,y:0}}
+        style={{position:'absolute',top:'62%',left:0,right:0,height:'4%'}} />
 
-      {/* Golden zone streaks */}
-      <LinearGradient colors={['transparent','rgba(215,145,15,0.52)','rgba(200,130,10,0.40)','transparent']}
+      {/* Golden zone */}
+      <LinearGradient colors={['transparent','rgba(215,148,12,0.52)','rgba(202,132,8,0.40)','transparent']}
         start={{x:0.10,y:0}} end={{x:0.90,y:0}}
-        style={{position:'absolute',top:'74%',left:0,right:0,height:'5%'}} />
-      <LinearGradient colors={['rgba(200,125,8,0.28)','rgba(225,155,20,0.55)','rgba(200,125,8,0.28)']}
+        style={{position:'absolute',top:'72%',left:0,right:0,height:'5%'}} />
+      <LinearGradient colors={['rgba(200,128,6,0.26)','rgba(226,158,18,0.54)','rgba(200,128,6,0.26)']}
         start={{x:0,y:0}} end={{x:1,y:0}}
         style={{position:'absolute',top:'82%',left:0,right:0,height:'4%'}} />
     </View>
@@ -335,9 +335,22 @@ export default function HomeScreen() {
             </View>
           ) : (
             <View style={s.tabBody}>
-              <Text style={s.sectionLabel}>↗  ニュース</Text>
-              <View style={s.discGrid}>
-                {DISCOVER_CARDS.map((c) => <DiscoverCard key={c.id} {...c} />)}
+              {/* Search bar */}
+              <View style={s.searchBar}>
+                <Ionicons name="search-outline" size={16} color="rgba(255,255,255,0.45)" style={{ marginRight: 8 }} />
+                <Text style={s.searchPlaceholder}>Find new shows</Text>
+              </View>
+              {/* News section */}
+              <View>
+                <View style={s.discSectionHeader}>
+                  <Ionicons name="trending-up-outline" size={14} color="rgba(255,255,255,0.55)" />
+                  <Text style={s.discSectionLabel}>News</Text>
+                </View>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={s.discRow}>
+                    {DISCOVER_CARDS.map((c) => <DiscoverCard key={c.id} {...c} />)}
+                  </View>
+                </ScrollView>
               </View>
             </View>
           )}
@@ -372,7 +385,7 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   heroText: {
-    position: 'absolute', bottom: 32, left: 0, right: 0, alignItems: 'center',
+    position: 'absolute', bottom: '40%', left: 0, right: 0, alignItems: 'center',
   },
   heroGreeting: {
     fontSize: 30, fontWeight: '700', color: '#fff', letterSpacing: -0.7,
@@ -437,17 +450,27 @@ const s = StyleSheet.create({
   schedTitle:{ fontSize: 13, fontWeight: '600', color: '#fff' },
   schedLoc:  { fontSize: 11, color: 'rgba(255,255,255,0.38)', marginTop: 2 },
 
-  // Discover
-  discGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  // Search bar
+  searchBar: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#1C1C1C', borderRadius: 24,
+    paddingHorizontal: 16, paddingVertical: 13,
+  },
+  searchPlaceholder: { fontSize: 15, color: 'rgba(255,255,255,0.38)' },
+
+  // Discover section
+  discSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
+  discSectionLabel:  { fontSize: 14, fontWeight: '700', color: 'rgba(255,255,255,0.70)' },
+  discRow:  { flexDirection: 'row', gap: 12, paddingBottom: 4 },
   discCard: {
-    width: '47%' as any, height: 155, borderRadius: 16,
-    overflow: 'hidden', padding: 16, justifyContent: 'flex-end',
+    width: 175, height: 170, borderRadius: 16,
+    overflow: 'hidden', padding: 14, justifyContent: 'flex-end',
   },
   discTitle: {
     fontSize: 15, fontWeight: '700', color: '#fff',
-    textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
+    textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
   },
-  discDesc: { fontSize: 11, color: 'rgba(255,255,255,0.78)', marginTop: 4 },
+  discDesc: { fontSize: 11, color: 'rgba(255,255,255,0.78)', marginTop: 3, lineHeight: 16 },
 
   // Empty
   emptyState: { alignItems: 'center', paddingVertical: 32 },
