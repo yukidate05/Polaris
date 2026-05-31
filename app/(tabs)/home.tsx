@@ -1,85 +1,84 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, Animated, ActivityIndicator,
+  StyleSheet, ActivityIndicator, ImageBackground, Dimensions,
 } from 'react-native';
 import { router } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
-import { GradientBackground, PolarisOrb } from '@components/ui';
 import { useAuthStore } from '@stores/authStore';
 import { useBriefingStore, type BriefingStatus } from '@stores/briefingStore';
 import { googleDataService, MOCK_GOOGLE_DATA } from '@services/googleDataService';
 import { briefingService } from '@services/briefingService';
-import { Colors } from '@constants/colors';
 import Constants from 'expo-constants';
 
+const { height: SCREEN_H } = Dimensions.get('window');
+const HERO_H = Math.round(SCREEN_H * 0.60);
 const isExpoGo = Constants.appOwnership === 'expo';
+const HERO_IMG = require('../../img/Huxe/3847.jpg');
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-
-interface KeepListeningItem {
-  id:    string;
-  title: string;
-  mins:  number;
-  colors:[string, string];
-}
-
-// ── Constants ──────────────────────────────────────────────────────────────────
-
-const KEEP_ITEMS: KeepListeningItem[] = [
-  { id: '1', title: 'AIニュースまとめ',      mins: 8,  colors: ['#C5D8FF', '#A8C4FA'] },
-  { id: '2', title: 'マーケットトレンド',    mins: 12, colors: ['#D4E8D4', '#B8DDB8'] },
-  { id: '3', title: 'サイエンスアップデート', mins: 6,  colors: ['#E8D4F0', '#DBBFE6'] },
-  { id: '4', title: 'デザインインサイト',    mins: 9,  colors: ['#FFE8CC', '#FAD4A8'] },
+const MONTHS = [
+  'January','February','March','April','May','June',
+  'July','August','September','October','November','December',
 ];
 
+function getGreeting(h: number) {
+  if (h < 12) return 'Good Morning';
+  if (h < 17) return 'Good Afternoon';
+  return 'Good Evening';
+}
+
+function formatDate() {
+  const d = new Date();
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+}
+
 const STATUS_LABELS: Record<BriefingStatus, string> = {
-  idle:              '準備完了',
-  fetching:          '情報を取得中...',
-  generating_script: 'AIが執筆中...',
-  generating_audio:  '音声を生成中...',
-  ready:             '再生できます',
-  error:             'エラーが発生しました',
+  idle:              'Preparing...',
+  fetching:          'Fetching data...',
+  generating_script: 'Writing script...',
+  generating_audio:  'Generating audio...',
+  ready:             'Ready to play',
+  error:             'Error occurred',
 };
 
-// ── Sub-components ─────────────────────────────────────────────────────────────
+const DISCOVER_CARDS = [
+  { id: '1', title: 'AI ニュース',  desc: "Today's top AI headlines", c1: '#5B8DB8', c2: '#3A6690' },
+  { id: '2', title: 'マーケット',   desc: 'Market trends & insights',  c1: '#B85B5B', c2: '#8F3A3A' },
+  { id: '3', title: 'テック',       desc: "What's shaping tech",        c1: '#5BB87A', c2: '#3A8F58' },
+  { id: '4', title: 'ビジネス',     desc: 'Business & economy',        c1: '#B8975B', c2: '#8F723A' },
+];
 
-function ScheduleItem({ ev }: { ev: { title: string; startTime: string; location?: string; iconName?: string } }) {
+// ── Sub-components ──────────────────────────────────────────────────────────────
+
+function ScheduleRow({ ev }: { ev: { title: string; startTime: string; location?: string } }) {
   return (
-    <View style={styles.scheduleRow}>
-      <Text style={styles.scheduleTime}>{ev.startTime}</Text>
-      <View style={styles.scheduleDot} />
+    <View style={s.schedRow}>
+      <Text style={s.schedTime}>{ev.startTime}</Text>
+      <View style={s.schedDot} />
       <View style={{ flex: 1 }}>
-        <Text style={styles.scheduleTitle} numberOfLines={1}>{ev.title}</Text>
-        {ev.location && (
-          <Text style={styles.scheduleLoc} numberOfLines={1}>{ev.location}</Text>
-        )}
+        <Text style={s.schedTitle} numberOfLines={1}>{ev.title}</Text>
+        {ev.location && <Text style={s.schedLoc} numberOfLines={1}>{ev.location}</Text>}
       </View>
-      <Ionicons name="chevron-forward" size={14} color={Colors.text.tertiary} />
     </View>
   );
 }
 
-function KeepCard({ item }: { item: KeepListeningItem }) {
+function DiscoverCard({ title, desc, c1, c2 }: { title: string; desc: string; c1: string; c2: string }) {
   return (
-    <TouchableOpacity style={styles.keepCard} activeOpacity={0.85}>
-      <LinearGradient colors={item.colors} style={styles.keepCover}>
-        <View style={styles.keepPlayBtn}>
-          <Ionicons name="play" size={16} color="#fff" />
-        </View>
-      </LinearGradient>
-      <Text style={styles.keepTitle} numberOfLines={2}>{item.title}</Text>
-      <Text style={styles.keepDuration}>{item.mins}分</Text>
+    <TouchableOpacity activeOpacity={0.8} style={s.discCard}>
+      <LinearGradient colors={[c1, c2]} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
+      <Text style={s.discTitle}>{title}</Text>
+      <Text style={s.discDesc} numberOfLines={2}>{desc}</Text>
     </TouchableOpacity>
   );
 }
 
-// ── Main Screen ────────────────────────────────────────────────────────────────
+// ── Main ────────────────────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
+  const insets = useSafeAreaInsets();
   const { user, profile, googleAccessToken } = useAuthStore();
   const {
     status, googleData, script, hasPlayed,
@@ -88,34 +87,19 @@ export default function HomeScreen() {
 
   const firstName = profile?.displayName?.split(' ')[0]
     ?? user?.displayName?.split(' ')[0]
-    ?? 'ゲスト';
+    ?? 'Guest';
 
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'おはようございます' : hour < 17 ? 'こんにちは' : 'こんばんは';
-  const dateStr = (() => {
-    const d = new Date();
-    const days = ['日', '月', '火', '水', '木', '金', '土'];
-    return `${d.getMonth() + 1}月${d.getDate()}日（${days[d.getDay()]}）`;
-  })();
+  const hour     = new Date().getHours();
+  const greeting = getGreeting(hour);
+  const dateStr  = formatDate();
 
-  const isGenerating = status === 'fetching' || status === 'generating_script' || status === 'generating_audio';
-
-  const fadeAnim  = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(20)).current;
-
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim,  { toValue: 1, duration: 600, useNativeDriver: true }),
-      Animated.timing(slideAnim, { toValue: 0, duration: 600, useNativeDriver: true }),
-    ]).start();
-  }, []);
+  const isGenerating = ['fetching', 'generating_script', 'generating_audio'].includes(status);
+  const [activeTab, setActiveTab] = useState<'foryou' | 'discover'>('foryou');
 
   const generateBriefing = useCallback(async () => {
     if (isGenerating) return;
-
     setStatus('fetching');
     let data = googleData;
-
     try {
       if (!data) {
         if (isExpoGo || !googleAccessToken) {
@@ -126,451 +110,294 @@ export default function HomeScreen() {
         }
         setGoogleData(data);
       }
-
       setStatus('generating_script');
-      const script = await briefingService.generate(data, firstName, [], hasPlayed, user?.uid ?? undefined);
-      setScript(script);
+      const sc = await briefingService.generate(data, firstName, [], hasPlayed, user?.uid ?? undefined);
+      setScript(sc);
     } catch (e: any) {
       setError(e?.message ?? 'Unknown error');
     }
   }, [isGenerating, googleData, googleAccessToken, firstName, hasPlayed]);
 
-  // Auto-generate on first load
   useEffect(() => {
-    if (status === 'idle') {
-      generateBriefing();
-    }
+    if (status === 'idle') generateBriefing();
   }, []);
 
   const handlePlay = () => {
-    if (script) {
-      setHasPlayed(true);
-      router.push('/player');
-    }
+    if (script) { setHasPlayed(true); router.push('/player'); }
   };
 
-  const unread      = googleData?.unreadCount  ?? 0;
-  const todayCount  = googleData?.todayEvents?.length ?? 0;
-  const todayEvents = googleData?.todayEvents  ?? [];
-  const tomorrow    = googleData?.tomorrowEvents ?? [];
+  const unread      = googleData?.unreadCount         ?? 0;
+  const todayCount  = googleData?.todayEvents?.length  ?? 0;
+  const todayEvs    = googleData?.todayEvents          ?? [];
+  const tomorrowEvs = googleData?.tomorrowEvents       ?? [];
+  const topEmails   = googleData?.topEmails            ?? [];
 
   return (
-    <GradientBackground>
-      <SafeAreaView style={styles.safe}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.appTitle}>Polaris</Text>
-          <TouchableOpacity onPress={() => router.push('/(tabs)/settings')} style={styles.avatarBtn}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{firstName.charAt(0).toUpperCase()}</Text>
-            </View>
-          </TouchableOpacity>
-        </View>
+    <View style={s.root}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scrollContent} bounces>
 
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}
-        >
-          <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+        {/* ── Hero ── */}
+        <View style={[s.hero, { height: HERO_H }]}>
+          <ImageBackground source={HERO_IMG} style={StyleSheet.absoluteFill} resizeMode="cover" />
 
-            {/* ── Hero Brief Card ── */}
-            <View style={styles.heroShadow}>
-              <View style={styles.heroClipper}>
-                <BlurView intensity={60} tint="light" style={StyleSheet.absoluteFill} />
-                <View style={styles.heroTint} pointerEvents="none" />
+          {/* Top scrim for header legibility */}
+          <LinearGradient
+            colors={['rgba(0,0,0,0.45)', 'transparent']}
+            style={[StyleSheet.absoluteFill, { height: 140 }]}
+          />
 
-                {/* Card content */}
-                <View style={styles.heroInner}>
-                  {/* Left column */}
-                  <View style={styles.heroLeft}>
-                    {/* Badge */}
-                    <View style={styles.badge}>
-                      <Ionicons name="sparkles" size={10} color={Colors.brand.primary} />
-                      <Text style={styles.badgeText}>今日のブリーフィング</Text>
-                    </View>
+          {/* Bottom fade to black */}
+          <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.55)', '#000']}
+            style={s.heroBottomFade}
+            locations={[0.45, 0.78, 1]}
+          />
 
-                    {/* Greeting */}
-                    <Text style={styles.heroGreeting}>
-                      {greeting}、{'\n'}{firstName}さん
-                    </Text>
-                    <Text style={styles.heroSub}>
-                      {status === 'ready'
-                        ? 'ブリーフィングの準備ができました。'
-                        : STATUS_LABELS[status]}
-                    </Text>
+          {/* Header */}
+          <View style={[s.header, { marginTop: insets.top + 6 }]} pointerEvents="box-none">
+            <Text style={s.appTitle}>Polaris</Text>
+            <TouchableOpacity onPress={() => router.push('/(tabs)/settings')} style={s.menuBtn}>
+              <Ionicons name="menu" size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
 
-                    {/* Play button */}
-                    <TouchableOpacity
-                      style={[styles.playPill, (!script || isGenerating) && styles.playPillDisabled]}
-                      onPress={handlePlay}
-                      disabled={!script || isGenerating}
-                      activeOpacity={0.8}
-                    >
-                      {isGenerating
-                        ? <ActivityIndicator size="small" color="#fff" />
-                        : <Ionicons name="play" size={14} color="#fff" />
-                      }
-                      <Text style={styles.playPillText}>
-                        {isGenerating ? '生成中...' : '再生する'}
-                      </Text>
-                    </TouchableOpacity>
-
-                    {/* Duration */}
-                    {script && (
-                      <Text style={styles.heroDuration}>
-                        約{Math.round(script.estimatedSeconds / 60)}分
-                        {script.audioUri ? '　AI Voice' : '　音声合成'}
-                      </Text>
-                    )}
-                  </View>
-
-                  {/* Orb (right) */}
-                  <View style={styles.heroOrb}>
-                    <PolarisOrb size={100} animate={isGenerating} />
-                  </View>
-                </View>
-              </View>
-            </View>
-
-            {/* ── Stats row ── */}
-            <View style={styles.statsRow}>
-              <StatChip
-                icon="mail-outline"
-                label="今日のメール"
-                value={`${unread}件`}
-              />
-              <StatChip
-                icon="calendar-outline"
-                label="今日の予定"
-                value={`${todayCount}件`}
-              />
-            </View>
-
-            {/* ── Keep listening ── */}
-            <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Keep listening</Text>
-                <TouchableOpacity>
-                  <Text style={styles.seeAll}>すべて見る</Text>
-                </TouchableOpacity>
-              </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                <View style={styles.keepRow}>
-                  {KEEP_ITEMS.map((item) => (
-                    <KeepCard key={item.id} item={item} />
-                  ))}
-                </View>
-              </ScrollView>
-            </View>
-
-            {/* ── Tomorrow's schedule ── */}
-            {tomorrow.length > 0 && (
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>明日の予定</Text>
-                  <TouchableOpacity>
-                    <Text style={styles.seeAll}>すべて見る</Text>
-                  </TouchableOpacity>
-                </View>
-                <View style={styles.scheduleCard}>
-                  <BlurView intensity={55} tint="light" style={StyleSheet.absoluteFill} />
-                  <View style={styles.scheduleCardTint} pointerEvents="none" />
-                  <View style={styles.scheduleCardContent}>
-                    {tomorrow.slice(0, 4).map((ev, i) => (
-                      <ScheduleItem key={i} ev={ev} />
-                    ))}
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {/* Today's schedule when no tomorrow */}
-            {tomorrow.length === 0 && todayEvents.length > 0 && (
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>今日の予定</Text>
-                  <TouchableOpacity>
-                    <Text style={styles.seeAll}>すべて見る</Text>
-                  </TouchableOpacity>
-                </View>
-                <View style={styles.scheduleCard}>
-                  <BlurView intensity={55} tint="light" style={StyleSheet.absoluteFill} />
-                  <View style={styles.scheduleCardTint} pointerEvents="none" />
-                  <View style={styles.scheduleCardContent}>
-                    {todayEvents.slice(0, 4).map((ev, i) => (
-                      <ScheduleItem key={i} ev={ev} />
-                    ))}
-                  </View>
-                </View>
-              </View>
-            )}
-
-          </Animated.View>
-        </ScrollView>
-      </SafeAreaView>
-    </GradientBackground>
-  );
-}
-
-// ── Stat Chip ─────────────────────────────────────────────────────────────────
-
-function StatChip({ icon, label, value }: { icon: any; label: string; value: string }) {
-  return (
-    <View style={styles.statShadow}>
-      <View style={styles.statClipper}>
-        <BlurView intensity={55} tint="light" style={StyleSheet.absoluteFill} />
-        <View style={styles.statTint} pointerEvents="none" />
-        <View style={styles.statInner}>
-          <Ionicons name={icon} size={18} color={Colors.brand.primary} />
-          <View>
-            <Text style={styles.statLabel}>{label}</Text>
-            <Text style={styles.statValue}>{value}</Text>
+          {/* Greeting */}
+          <View style={s.heroText}>
+            <Text style={s.heroGreeting}>{greeting}, {firstName}</Text>
+            <Text style={s.heroDate}>{dateStr}</Text>
           </View>
         </View>
-      </View>
+
+        {/* ── Below hero ── */}
+        <View style={s.below}>
+
+          {/* Stats bar */}
+          <View style={s.statsBar}>
+            <View style={s.statItem}>
+              <Ionicons name="mail-outline" size={20} color="rgba(255,255,255,0.7)" />
+              <Text style={s.statNum}>{unread}</Text>
+            </View>
+            <View style={s.statDivider} />
+            <View style={s.statItem}>
+              <Ionicons name="calendar-outline" size={20} color="rgba(255,255,255,0.7)" />
+              <Text style={s.statNum}>{todayCount}</Text>
+            </View>
+          </View>
+
+          {/* Play button */}
+          <TouchableOpacity
+            style={[s.playBtn, (!script || isGenerating) && s.playBtnDimmed]}
+            onPress={handlePlay}
+            disabled={!script || isGenerating}
+            activeOpacity={0.88}
+          >
+            {isGenerating ? (
+              <>
+                <ActivityIndicator size="small" color="#000" style={{ marginRight: 8 }} />
+                <Text style={s.playBtnText}>{STATUS_LABELS[status]}</Text>
+              </>
+            ) : (
+              <>
+                <Ionicons name="play" size={14} color="#000" style={{ marginRight: 7 }} />
+                <Text style={s.playBtnText}>Play</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          {/* Tabs */}
+          <View style={s.tabRow}>
+            <TouchableOpacity style={s.tabItem} onPress={() => setActiveTab('foryou')}>
+              <Text style={[s.tabLabel, activeTab === 'foryou' && s.tabLabelOn]}>For You</Text>
+              {activeTab === 'foryou' && <View style={s.tabUnderline} />}
+            </TouchableOpacity>
+            <TouchableOpacity style={s.tabItem} onPress={() => setActiveTab('discover')}>
+              <Text style={[s.tabLabel, activeTab === 'discover' && s.tabLabelOn]}>Discover</Text>
+              {activeTab === 'discover' && <View style={s.tabUnderline} />}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.tabRefresh}
+              onPress={generateBriefing}
+              disabled={isGenerating}
+            >
+              <Ionicons name="refresh" size={18} color={isGenerating ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.45)'} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Tab body */}
+          {activeTab === 'foryou' ? (
+            <View style={s.tabBody}>
+
+              {/* Email highlights */}
+              {topEmails.length > 0 && (
+                <View style={s.section}>
+                  <Text style={s.sectionLabel}>✉  今日のメール</Text>
+                  <View style={s.listCard}>
+                    {topEmails.slice(0, 3).map((e, i) => (
+                      <View key={i} style={[s.emailRow, i > 0 && s.rowBorder]}>
+                        <View style={s.emailDot} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={s.emailFrom} numberOfLines={1}>{e.from}</Text>
+                          <Text style={s.emailSubject} numberOfLines={1}>{e.subject}</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* Today's schedule */}
+              {todayEvs.length > 0 && (
+                <View style={s.section}>
+                  <Text style={s.sectionLabel}>📅  今日の予定</Text>
+                  <View style={s.listCard}>
+                    {todayEvs.slice(0, 4).map((ev, i) => (
+                      <View key={i} style={i > 0 ? s.rowBorder : undefined}>
+                        <ScheduleRow ev={ev} />
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* Tomorrow */}
+              {tomorrowEvs.length > 0 && (
+                <View style={s.section}>
+                  <Text style={s.sectionLabel}>🌙  明日の予定</Text>
+                  <View style={s.listCard}>
+                    {tomorrowEvs.slice(0, 4).map((ev, i) => (
+                      <View key={i} style={i > 0 ? s.rowBorder : undefined}>
+                        <ScheduleRow ev={ev} />
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* Empty state */}
+              {topEmails.length === 0 && todayEvs.length === 0 && !isGenerating && (
+                <View style={s.emptyState}>
+                  <Text style={s.emptyText}>今日のデータを読み込んでいます</Text>
+                </View>
+              )}
+
+            </View>
+          ) : (
+            <View style={s.tabBody}>
+              <Text style={s.sectionLabel}>↗  ニュース</Text>
+              <View style={s.discGrid}>
+                {DISCOVER_CARDS.map((c) => <DiscoverCard key={c.id} {...c} />)}
+              </View>
+            </View>
+          )}
+
+        </View>
+      </ScrollView>
     </View>
   );
 }
 
-// ── Styles ─────────────────────────────────────────────────────────────────────
+// ── Styles ──────────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
-  safe:   { flex: 1 },
-  scroll: { paddingHorizontal: 20, paddingBottom: 110, gap: 16 },
+const s = StyleSheet.create({
+  root:          { flex: 1, backgroundColor: '#000' },
+  scrollContent: { paddingBottom: 120 },
 
-  // Header
+  // Hero
+  hero: { width: '100%', position: 'relative' },
+  heroBottomFade: {
+    position: 'absolute', bottom: 0, left: 0, right: 0, height: 220,
+  },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 22,
   },
   appTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: Colors.text.primary,
-    letterSpacing: -0.5,
+    fontSize: 26, fontWeight: '800', color: '#fff', letterSpacing: -0.6,
   },
-  avatarBtn: { padding: 2 },
-  avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: Colors.brand.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
+  menuBtn: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center', justifyContent: 'center',
   },
-  avatarText: { fontSize: 14, fontWeight: '700', color: '#fff' },
-
-  // Hero card
-  heroShadow: {
-    borderRadius: 24,
-    shadowColor: '#6878A8',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.14,
-    shadowRadius: 24,
-    elevation: 8,
+  heroText: {
+    position: 'absolute', bottom: 32, left: 0, right: 0, alignItems: 'center',
   },
-  heroClipper: {
-    borderRadius: 24,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.75)',
-    minHeight: 200,
-  },
-  heroTint: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(235,242,255,0.55)',
-  },
-  heroInner: {
-    flexDirection: 'row',
-    padding: 22,
-    alignItems: 'center',
-    gap: 12,
-  },
-  heroLeft: { flex: 1, gap: 10 },
-  heroOrb:  { width: 110, alignItems: 'center', justifyContent: 'center' },
-
-  badge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(107,140,255,0.12)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: Colors.brand.primary,
-  },
-
   heroGreeting: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: Colors.text.primary,
-    letterSpacing: -0.5,
-    lineHeight: 30,
+    fontSize: 30, fontWeight: '700', color: '#fff', letterSpacing: -0.7,
+    textShadowColor: 'rgba(0,0,0,0.45)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 10,
   },
-  heroSub: {
-    fontSize: 13,
-    color: Colors.text.secondary,
-    lineHeight: 18,
+  heroDate: {
+    fontSize: 14, color: 'rgba(255,255,255,0.72)', marginTop: 5, fontWeight: '500',
   },
 
-  playPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    alignSelf: 'flex-start',
-    backgroundColor: Colors.brand.primary,
-    paddingHorizontal: 18,
-    paddingVertical: 9,
-    borderRadius: 20,
-    shadowColor: Colors.brand.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 4,
-  },
-  playPillDisabled: { opacity: 0.55 },
-  playPillText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  heroDuration: {
-    fontSize: 11,
-    color: Colors.text.tertiary,
-    fontWeight: '500',
-  },
+  // Below hero
+  below: { backgroundColor: '#000', paddingHorizontal: 22, paddingTop: 2, gap: 18 },
 
   // Stats
-  statsRow: { flexDirection: 'row', gap: 12 },
-  statShadow: {
-    flex: 1,
-    borderRadius: 16,
-    shadowColor: '#6878A8',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.10,
-    shadowRadius: 14,
-    elevation: 4,
-  },
-  statClipper: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.70)',
-  },
-  statTint: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,255,255,0.35)' },
-  statInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 14,
-  },
-  statLabel: {
-    fontSize: 11,
-    color: Colors.text.tertiary,
-    fontWeight: '500',
-  },
-  statValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.text.primary,
-  },
+  statsBar:    { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 36, paddingVertical: 14 },
+  statItem:    { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  statNum:     { fontSize: 22, fontWeight: '600', color: '#fff' },
+  statDivider: { width: 1, height: 22, backgroundColor: 'rgba(255,255,255,0.18)' },
 
-  // Sections
-  section: { gap: 12 },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  // Play button
+  playBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#fff', borderRadius: 30, paddingVertical: 17,
   },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.text.primary,
-    letterSpacing: -0.2,
-  },
-  seeAll: {
-    fontSize: 13,
-    color: Colors.brand.primary,
-    fontWeight: '500',
-  },
+  playBtnDimmed: { opacity: 0.48 },
+  playBtnText:   { fontSize: 16, fontWeight: '600', color: '#000' },
 
-  // Keep listening
-  keepRow: { flexDirection: 'row', gap: 12, paddingBottom: 4 },
-  keepCard: { width: 130, gap: 8 },
-  keepCover: {
-    width: 130,
-    height: 100,
-    borderRadius: 16,
-    justifyContent: 'flex-end',
-    alignItems: 'flex-start',
-    padding: 10,
+  // Tabs
+  tabRow: {
+    flexDirection: 'row', alignItems: 'center',
+    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.09)',
   },
-  keepPlayBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: 'rgba(0,0,0,0.28)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  tabItem:      { paddingBottom: 13, marginRight: 22, position: 'relative' },
+  tabLabel:     { fontSize: 15, fontWeight: '500', color: 'rgba(255,255,255,0.38)' },
+  tabLabelOn:   { color: '#fff', fontWeight: '700' },
+  tabUnderline: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    height: 2, backgroundColor: '#fff', borderRadius: 1,
   },
-  keepTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.text.primary,
-    lineHeight: 17,
-  },
-  keepDuration: {
-    fontSize: 11,
-    color: Colors.text.tertiary,
-    fontWeight: '500',
-  },
+  tabRefresh: { marginLeft: 'auto' as any, paddingBottom: 13 },
+  tabBody:    { gap: 22, paddingTop: 6 },
 
-  // Schedule card (two-layer: outer shadow, inner overflow:hidden for blur clip)
-  scheduleCard: {
-    borderRadius: 18,
-    overflow: 'hidden',  // clips BlurView to border radius (no shadow on this view)
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.70)',
-  },
-  scheduleCardTint: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.40)',
-  },
-  scheduleCardContent: { padding: 16, gap: 14 },
+  // Section
+  section:      { gap: 10 },
+  sectionLabel: { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.42)', letterSpacing: 0.5 },
 
-  scheduleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+  // List card (shared by email and schedule)
+  listCard: {
+    backgroundColor: '#111', borderRadius: 16, overflow: 'hidden',
   },
-  scheduleTime: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.text.tertiary,
-    width: 40,
+  rowBorder: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.07)' },
+
+  // Email
+  emailRow:    { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
+  emailDot:    { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.35)' },
+  emailFrom:   { fontSize: 13, fontWeight: '600', color: '#fff' },
+  emailSubject:{ fontSize: 12, color: 'rgba(255,255,255,0.48)', marginTop: 2 },
+
+  // Schedule
+  schedRow:  { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14 },
+  schedTime: { fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.38)', width: 40 },
+  schedDot:  { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.55)' },
+  schedTitle:{ fontSize: 13, fontWeight: '600', color: '#fff' },
+  schedLoc:  { fontSize: 11, color: 'rgba(255,255,255,0.38)', marginTop: 2 },
+
+  // Discover
+  discGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  discCard: {
+    width: '47%' as any, height: 155, borderRadius: 16,
+    overflow: 'hidden', padding: 16, justifyContent: 'flex-end',
   },
-  scheduleDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: Colors.brand.primary,
+  discTitle: {
+    fontSize: 15, fontWeight: '700', color: '#fff',
+    textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
   },
-  scheduleTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.text.primary,
-  },
-  scheduleLoc: {
-    fontSize: 11,
-    color: Colors.text.tertiary,
-    marginTop: 2,
-  },
+  discDesc: { fontSize: 11, color: 'rgba(255,255,255,0.78)', marginTop: 4 },
+
+  // Empty
+  emptyState: { alignItems: 'center', paddingVertical: 32 },
+  emptyText:  { fontSize: 14, color: 'rgba(255,255,255,0.3)' },
 });
