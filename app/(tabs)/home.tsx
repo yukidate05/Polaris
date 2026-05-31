@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, ActivityIndicator, ImageBackground, Dimensions,
+  StyleSheet, ActivityIndicator, Dimensions,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,7 +16,6 @@ import Constants from 'expo-constants';
 const { height: SCREEN_H } = Dimensions.get('window');
 const HERO_H = Math.round(SCREEN_H * 0.60);
 const isExpoGo = Constants.appOwnership === 'expo';
-const HERO_IMG = require('../../img/Huxe/3847.jpg');
 
 const MONTHS = [
   'January','February','March','April','May','June',
@@ -49,6 +48,65 @@ const DISCOVER_CARDS = [
   { id: '3', title: 'テック',       desc: "What's shaping tech",        c1: '#5BB87A', c2: '#3A8F58' },
   { id: '4', title: 'ビジネス',     desc: 'Business & economy',        c1: '#B8975B', c2: '#8F723A' },
 ];
+
+// ── Sunrise background (horizontal motion-streak gradient) ──────────────────────
+
+function SunriseBackground() {
+  return (
+    <View style={StyleSheet.absoluteFill}>
+      {/* Base vertical color zones — top:gray-lavender → maroon → red → orange → gold */}
+      <LinearGradient
+        colors={['#9B8898', '#5E3C58', '#5A2232', '#8A2420', '#C24418', '#D26E0C', '#C8900A']}
+        locations={[0, 0.16, 0.32, 0.50, 0.66, 0.83, 1]}
+        style={StyleSheet.absoluteFill}
+      />
+
+      {/* Horizontal streak layers — simulate motion-blur streaks of a real sunset photo */}
+      {/* Gray-lavender zone streaks */}
+      <LinearGradient colors={['transparent','rgba(170,145,160,0.42)','rgba(155,128,148,0.30)','transparent']}
+        start={{x:0,y:0}} end={{x:1,y:0}}
+        style={{position:'absolute',top:'4%',left:0,right:0,height:'5%'}} />
+      <LinearGradient colors={['transparent','rgba(140,110,130,0.35)','transparent']}
+        start={{x:0.12,y:0}} end={{x:0.88,y:0}}
+        style={{position:'absolute',top:'10%',left:0,right:0,height:'3%'}} />
+      <LinearGradient colors={['rgba(110,80,100,0.20)','rgba(130,100,120,0.40)','rgba(110,80,100,0.20)']}
+        start={{x:0,y:0}} end={{x:1,y:0}}
+        style={{position:'absolute',top:'16%',left:0,right:0,height:'4%'}} />
+
+      {/* Maroon zone streaks */}
+      <LinearGradient colors={['transparent','rgba(100,40,55,0.50)','rgba(90,32,45,0.38)','transparent']}
+        start={{x:0.05,y:0}} end={{x:0.95,y:0}}
+        style={{position:'absolute',top:'24%',left:0,right:0,height:'4%'}} />
+      <LinearGradient colors={['rgba(80,28,38,0.22)','rgba(105,36,48,0.48)','transparent']}
+        start={{x:0,y:0}} end={{x:1,y:0}}
+        style={{position:'absolute',top:'30%',left:0,right:0,height:'3%'}} />
+
+      {/* Red zone streaks */}
+      <LinearGradient colors={['transparent','rgba(160,45,30,0.52)','rgba(145,38,24,0.40)','transparent']}
+        start={{x:0,y:0}} end={{x:1,y:0}}
+        style={{position:'absolute',top:'38%',left:0,right:0,height:'5%'}} />
+      <LinearGradient colors={['rgba(130,35,22,0.28)','rgba(165,48,30,0.55)','rgba(130,35,22,0.28)']}
+        start={{x:0.08,y:0}} end={{x:0.92,y:0}}
+        style={{position:'absolute',top:'46%',left:0,right:0,height:'3%'}} />
+
+      {/* Orange zone streaks */}
+      <LinearGradient colors={['transparent','rgba(210,90,22,0.55)','rgba(195,78,16,0.42)','transparent']}
+        start={{x:0,y:0}} end={{x:1,y:0}}
+        style={{position:'absolute',top:'55%',left:0,right:0,height:'6%'}} />
+      <LinearGradient colors={['rgba(195,75,15,0.30)','rgba(225,105,25,0.58)','rgba(195,75,15,0.30)']}
+        start={{x:0.05,y:0}} end={{x:0.95,y:0}}
+        style={{position:'absolute',top:'63%',left:0,right:0,height:'4%'}} />
+
+      {/* Golden zone streaks */}
+      <LinearGradient colors={['transparent','rgba(215,145,15,0.52)','rgba(200,130,10,0.40)','transparent']}
+        start={{x:0.10,y:0}} end={{x:0.90,y:0}}
+        style={{position:'absolute',top:'74%',left:0,right:0,height:'5%'}} />
+      <LinearGradient colors={['rgba(200,125,8,0.28)','rgba(225,155,20,0.55)','rgba(200,125,8,0.28)']}
+        start={{x:0,y:0}} end={{x:1,y:0}}
+        style={{position:'absolute',top:'82%',left:0,right:0,height:'4%'}} />
+    </View>
+  );
+}
 
 // ── Sub-components ──────────────────────────────────────────────────────────────
 
@@ -138,17 +196,11 @@ export default function HomeScreen() {
 
         {/* ── Hero ── */}
         <View style={[s.hero, { height: HERO_H }]}>
-          <ImageBackground source={HERO_IMG} style={StyleSheet.absoluteFill} resizeMode="cover" />
-
-          {/* Top scrim so header text is legible */}
-          <LinearGradient
-            colors={['rgba(0,0,0,0.50)', 'rgba(0,0,0,0.10)', 'transparent']}
-            style={s.heroTopScrim}
-          />
+          <SunriseBackground />
 
           {/* Bottom fade to black */}
           <LinearGradient
-            colors={['transparent', 'rgba(0,0,0,0.55)', '#000']}
+            colors={['transparent', 'rgba(0,0,0,0.60)', '#000']}
             style={s.heroBottomFade}
             locations={[0.40, 0.75, 1]}
           />
@@ -304,9 +356,6 @@ const s = StyleSheet.create({
 
   // Hero
   hero: { width: '100%', position: 'relative' },
-  heroTopScrim: {
-    position: 'absolute', top: 0, left: 0, right: 0, height: 140,
-  },
   heroBottomFade: {
     position: 'absolute', bottom: 0, left: 0, right: 0, height: 220,
   },
