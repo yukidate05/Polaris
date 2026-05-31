@@ -54,54 +54,54 @@ const DISCOVER_CARDS = [
 function SunriseBackground() {
   return (
     <View style={StyleSheet.absoluteFill}>
-      {/* Base vertical zones: warm gray → muted mauve → dark maroon → red → orange → gold */}
+      {/* Base vertical zones: dark navy → ocean blue → teal → emerald green */}
       <LinearGradient
-        colors={['#A09098', '#806070', '#5E3040', '#742830', '#A83A1C', '#CC580C', '#CC7E08']}
-        locations={[0, 0.18, 0.32, 0.46, 0.60, 0.78, 1]}
+        colors={['#080E20', '#0A2248', '#0A4070', '#0A6878', '#0A8858', '#0A9840', '#087830']}
+        locations={[0, 0.16, 0.32, 0.48, 0.64, 0.80, 1]}
         style={StyleSheet.absoluteFill}
       />
 
       {/* ── Horizontal motion-streak layers ── */}
-      {/* Warm gray top zone */}
-      <LinearGradient colors={['transparent','rgba(175,155,162,0.45)','rgba(160,138,148,0.32)','transparent']}
+      {/* Deep navy top zone */}
+      <LinearGradient colors={['transparent','rgba(30,80,160,0.40)','rgba(20,65,140,0.28)','transparent']}
         start={{x:0,y:0}} end={{x:1,y:0}}
         style={{position:'absolute',top:'3%',left:0,right:0,height:'4%'}} />
-      <LinearGradient colors={['rgba(148,125,138,0.22)','rgba(165,142,154,0.42)','transparent']}
+      <LinearGradient colors={['rgba(18,55,120,0.20)','rgba(28,75,155,0.38)','transparent']}
         start={{x:0.08,y:0}} end={{x:1,y:0}}
         style={{position:'absolute',top:'8%',left:0,right:0,height:'3%'}} />
-      <LinearGradient colors={['transparent','rgba(155,132,144,0.38)','rgba(140,118,130,0.28)','transparent']}
+      <LinearGradient colors={['transparent','rgba(25,70,148,0.36)','rgba(18,58,130,0.25)','transparent']}
         start={{x:0,y:0}} end={{x:1,y:0}}
         style={{position:'absolute',top:'14%',left:0,right:0,height:'4%'}} />
 
-      {/* Muted mauve zone */}
-      <LinearGradient colors={['transparent','rgba(115,75,88,0.48)','rgba(100,62,76,0.36)','transparent']}
+      {/* Ocean blue zone */}
+      <LinearGradient colors={['transparent','rgba(15,90,175,0.46)','rgba(12,78,158,0.34)','transparent']}
         start={{x:0.05,y:0}} end={{x:0.95,y:0}}
         style={{position:'absolute',top:'22%',left:0,right:0,height:'4%'}} />
-      <LinearGradient colors={['rgba(88,52,65,0.20)','rgba(112,70,84,0.46)','transparent']}
+      <LinearGradient colors={['rgba(10,68,142,0.18)','rgba(16,95,185,0.44)','transparent']}
         start={{x:0,y:0}} end={{x:1,y:0}}
         style={{position:'absolute',top:'29%',left:0,right:0,height:'3%'}} />
 
-      {/* Dark maroon → red zone */}
-      <LinearGradient colors={['transparent','rgba(155,48,35,0.52)','rgba(140,40,28,0.40)','transparent']}
+      {/* Teal transition zone */}
+      <LinearGradient colors={['transparent','rgba(12,140,155,0.50)','rgba(10,122,138,0.38)','transparent']}
         start={{x:0,y:0}} end={{x:1,y:0}}
         style={{position:'absolute',top:'37%',left:0,right:0,height:'5%'}} />
-      <LinearGradient colors={['rgba(122,34,24,0.25)','rgba(158,48,32,0.54)','rgba(122,34,24,0.25)']}
+      <LinearGradient colors={['rgba(8,108,125,0.22)','rgba(14,148,165,0.52)','rgba(8,108,125,0.22)']}
         start={{x:0.06,y:0}} end={{x:0.94,y:0}}
         style={{position:'absolute',top:'44%',left:0,right:0,height:'3%'}} />
 
-      {/* Orange zone */}
-      <LinearGradient colors={['transparent','rgba(215,95,18,0.55)','rgba(198,80,12,0.42)','transparent']}
+      {/* Teal-green zone */}
+      <LinearGradient colors={['transparent','rgba(10,165,118,0.52)','rgba(8,148,105,0.40)','transparent']}
         start={{x:0,y:0}} end={{x:1,y:0}}
         style={{position:'absolute',top:'54%',left:0,right:0,height:'5%'}} />
-      <LinearGradient colors={['rgba(198,78,10,0.28)','rgba(228,108,20,0.58)','rgba(198,78,10,0.28)']}
+      <LinearGradient colors={['rgba(8,135,95,0.26)','rgba(12,178,128,0.55)','rgba(8,135,95,0.26)']}
         start={{x:0.04,y:0}} end={{x:0.96,y:0}}
         style={{position:'absolute',top:'62%',left:0,right:0,height:'4%'}} />
 
-      {/* Golden zone */}
-      <LinearGradient colors={['transparent','rgba(215,148,12,0.52)','rgba(202,132,8,0.40)','transparent']}
+      {/* Emerald green zone */}
+      <LinearGradient colors={['transparent','rgba(10,185,85,0.50)','rgba(8,165,72,0.38)','transparent']}
         start={{x:0.10,y:0}} end={{x:0.90,y:0}}
         style={{position:'absolute',top:'72%',left:0,right:0,height:'5%'}} />
-      <LinearGradient colors={['rgba(200,128,6,0.26)','rgba(226,158,18,0.54)','rgba(200,128,6,0.26)']}
+      <LinearGradient colors={['rgba(8,155,65,0.24)','rgba(12,195,92,0.52)','rgba(8,155,65,0.24)']}
         start={{x:0,y:0}} end={{x:1,y:0}}
         style={{position:'absolute',top:'82%',left:0,right:0,height:'4%'}} />
     </View>
