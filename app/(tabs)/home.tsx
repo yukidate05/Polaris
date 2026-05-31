@@ -1,7 +1,7 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, ActivityIndicator, Dimensions,
+  StyleSheet, ActivityIndicator, Dimensions, Animated,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -49,61 +49,57 @@ const DISCOVER_CARDS = [
   { id: '4', title: 'ビジネス',     desc: 'Business & economy',        c1: '#B8975B', c2: '#8F723A' },
 ];
 
-// ── Sunrise background (horizontal motion-streak gradient) ──────────────────────
+// ── Aurora animated background ──────────────────────────────────────────────────
+// HTML参考: createConicGradient + screen blend で複数バンドが独立回転
+// RN版: 4つのLinearGradientをAnimated.loopで独立してパルス＋漂流
 
-function SunriseBackground() {
+const AURORA_BANDS = [
+  { colors: ['transparent','rgba(0,230,180,0.60)','rgba(0,180,230,0.40)','transparent'],
+    start:{x:0.0,y:0.08}, end:{x:1.0,y:0.55}, opMin:0.18, opMax:0.85, drift:[-28,18], dur:7200, delay:0 },
+  { colors: ['transparent','rgba(60,100,255,0.55)','rgba(120,220,255,0.38)','transparent'],
+    start:{x:0.05,y:0.20}, end:{x:0.95,y:0.68}, opMin:0.15, opMax:0.72, drift:[20,-22], dur:9400, delay:1800 },
+  { colors: ['transparent','rgba(150,50,255,0.50)','rgba(80,210,255,0.32)','transparent'],
+    start:{x:0.12,y:0.06}, end:{x:0.88,y:0.60}, opMin:0.12, opMax:0.65, drift:[-15,30], dur:8100, delay:3400 },
+  { colors: ['transparent','rgba(0,255,140,0.45)','rgba(0,210,190,0.35)','transparent'],
+    start:{x:0.18,y:0.26}, end:{x:0.82,y:0.72}, opMin:0.20, opMax:0.78, drift:[12,-18], dur:10600, delay:900 },
+];
+
+function AuroraBackground() {
+  const anims = useRef(AURORA_BANDS.map(() => new Animated.Value(0))).current;
+
+  useEffect(() => {
+    const loops = AURORA_BANDS.map((band, i) => {
+      const steps: Animated.CompositeAnimation[] = [];
+      if (band.delay > 0) steps.push(Animated.delay(band.delay));
+      steps.push(Animated.timing(anims[i], { toValue: 1, duration: band.dur, useNativeDriver: true }));
+      steps.push(Animated.timing(anims[i], { toValue: 0, duration: band.dur, useNativeDriver: true }));
+      return Animated.loop(Animated.sequence(steps));
+    });
+    loops.forEach((l) => l.start());
+    return () => loops.forEach((l) => l.stop());
+  }, []);
+
   return (
-    <View style={StyleSheet.absoluteFill}>
-      {/* Base vertical zones: dark navy → ocean blue → teal → emerald green */}
+    <View style={[StyleSheet.absoluteFill, { backgroundColor: '#020610' }]}>
       <LinearGradient
-        colors={['#080E20', '#0A2248', '#0A4070', '#0A6878', '#0A8858', '#0A9840', '#087830']}
-        locations={[0, 0.16, 0.32, 0.48, 0.64, 0.80, 1]}
+        colors={['#030816', '#060e24', '#040a18']}
+        locations={[0, 0.5, 1]}
         style={StyleSheet.absoluteFill}
       />
-
-      {/* ── Horizontal motion-streak layers ── */}
-      {/* Deep navy top zone */}
-      <LinearGradient colors={['transparent','rgba(30,80,160,0.40)','rgba(20,65,140,0.28)','transparent']}
-        start={{x:0,y:0}} end={{x:1,y:0}}
-        style={{position:'absolute',top:'3%',left:0,right:0,height:'4%'}} />
-      <LinearGradient colors={['rgba(18,55,120,0.20)','rgba(28,75,155,0.38)','transparent']}
-        start={{x:0.08,y:0}} end={{x:1,y:0}}
-        style={{position:'absolute',top:'8%',left:0,right:0,height:'3%'}} />
-      <LinearGradient colors={['transparent','rgba(25,70,148,0.36)','rgba(18,58,130,0.25)','transparent']}
-        start={{x:0,y:0}} end={{x:1,y:0}}
-        style={{position:'absolute',top:'14%',left:0,right:0,height:'4%'}} />
-
-      {/* Ocean blue zone */}
-      <LinearGradient colors={['transparent','rgba(15,90,175,0.46)','rgba(12,78,158,0.34)','transparent']}
-        start={{x:0.05,y:0}} end={{x:0.95,y:0}}
-        style={{position:'absolute',top:'22%',left:0,right:0,height:'4%'}} />
-      <LinearGradient colors={['rgba(10,68,142,0.18)','rgba(16,95,185,0.44)','transparent']}
-        start={{x:0,y:0}} end={{x:1,y:0}}
-        style={{position:'absolute',top:'29%',left:0,right:0,height:'3%'}} />
-
-      {/* Teal transition zone */}
-      <LinearGradient colors={['transparent','rgba(12,140,155,0.50)','rgba(10,122,138,0.38)','transparent']}
-        start={{x:0,y:0}} end={{x:1,y:0}}
-        style={{position:'absolute',top:'37%',left:0,right:0,height:'5%'}} />
-      <LinearGradient colors={['rgba(8,108,125,0.22)','rgba(14,148,165,0.52)','rgba(8,108,125,0.22)']}
-        start={{x:0.06,y:0}} end={{x:0.94,y:0}}
-        style={{position:'absolute',top:'44%',left:0,right:0,height:'3%'}} />
-
-      {/* Teal-green zone */}
-      <LinearGradient colors={['transparent','rgba(10,165,118,0.52)','rgba(8,148,105,0.40)','transparent']}
-        start={{x:0,y:0}} end={{x:1,y:0}}
-        style={{position:'absolute',top:'54%',left:0,right:0,height:'5%'}} />
-      <LinearGradient colors={['rgba(8,135,95,0.26)','rgba(12,178,128,0.55)','rgba(8,135,95,0.26)']}
-        start={{x:0.04,y:0}} end={{x:0.96,y:0}}
-        style={{position:'absolute',top:'62%',left:0,right:0,height:'4%'}} />
-
-      {/* Emerald green zone */}
-      <LinearGradient colors={['transparent','rgba(10,185,85,0.50)','rgba(8,165,72,0.38)','transparent']}
-        start={{x:0.10,y:0}} end={{x:0.90,y:0}}
-        style={{position:'absolute',top:'72%',left:0,right:0,height:'5%'}} />
-      <LinearGradient colors={['rgba(8,155,65,0.24)','rgba(12,195,92,0.52)','rgba(8,155,65,0.24)']}
-        start={{x:0,y:0}} end={{x:1,y:0}}
-        style={{position:'absolute',top:'82%',left:0,right:0,height:'4%'}} />
+      {AURORA_BANDS.map((band, i) => {
+        const opacity   = anims[i].interpolate({ inputRange:[0,1], outputRange:[band.opMin, band.opMax] });
+        const translateY = anims[i].interpolate({ inputRange:[0,1], outputRange:band.drift });
+        return (
+          <Animated.View key={i} style={[StyleSheet.absoluteFill, { opacity, transform:[{translateY}] }]}>
+            <LinearGradient
+              colors={band.colors as string[]}
+              start={band.start}
+              end={band.end}
+              style={StyleSheet.absoluteFill}
+            />
+          </Animated.View>
+        );
+      })}
     </View>
   );
 }
@@ -196,7 +192,7 @@ export default function HomeScreen() {
 
         {/* ── Hero ── */}
         <View style={[s.hero, { height: HERO_H }]}>
-          <SunriseBackground />
+          <AuroraBackground />
 
           {/* Bottom fade to black */}
           <LinearGradient
@@ -364,7 +360,7 @@ export default function HomeScreen() {
 // ── Styles ──────────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  root:          { flex: 1, backgroundColor: '#000' },
+  root:          { flex: 1, backgroundColor: '#020610' },
   scrollContent: { paddingBottom: 120 },
 
   // Hero
@@ -396,7 +392,7 @@ const s = StyleSheet.create({
   },
 
   // Below hero
-  below: { backgroundColor: '#000', paddingHorizontal: 22, paddingTop: 2, gap: 18 },
+  below: { backgroundColor: '#020610', paddingHorizontal: 22, paddingTop: 2, gap: 18 },
 
   // Stats
   statsBar:    { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 36, paddingVertical: 14 },
