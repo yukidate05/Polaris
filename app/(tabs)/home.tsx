@@ -40,6 +40,7 @@ const STATUS_LABELS: Record<BriefingStatus, string> = {
   generating_audio:  'Generating audio...',
   ready:             'Ready to play',
   error:             'Error occurred',
+  quota_exceeded:    '今日の利用上限に達しました',
 };
 
 const DISCOVER_CARDS = [
@@ -168,7 +169,12 @@ export default function HomeScreen() {
       const sc = await briefingService.generate(data, firstName, [], hasPlayed, user?.uid ?? undefined);
       setScript(sc);
     } catch (e: any) {
-      setError(e?.message ?? 'Unknown error');
+      const msg = e?.message ?? '';
+      if (msg.includes('429') || msg.includes('quota_exceeded')) {
+        setStatus('quota_exceeded');
+      } else {
+        setError(msg || 'Unknown error');
+      }
     }
   }, [isGenerating, googleData, googleAccessToken, firstName, hasPlayed]);
 
@@ -232,25 +238,38 @@ export default function HomeScreen() {
             </View>
           </View>
 
+          {/* Quota exceeded banner */}
+          {status === 'quota_exceeded' && (
+            <View style={s.quotaBanner}>
+              <Ionicons name="alert-circle-outline" size={20} color="#F4A24A" />
+              <View style={{ flex: 1 }}>
+                <Text style={s.quotaTitle}>今日はこれ以上生成できません</Text>
+                <Text style={s.quotaSub}>Gemini APIの無料枠を使い切りました。明日リセットされます。</Text>
+              </View>
+            </View>
+          )}
+
           {/* Play button */}
-          <TouchableOpacity
-            style={[s.playBtn, (!script || isGenerating) && s.playBtnDimmed]}
-            onPress={handlePlay}
-            disabled={!script || isGenerating}
-            activeOpacity={0.88}
-          >
-            {isGenerating ? (
-              <>
-                <ActivityIndicator size="small" color="#000" style={{ marginRight: 8 }} />
-                <Text style={s.playBtnText}>{STATUS_LABELS[status]}</Text>
-              </>
-            ) : (
-              <>
-                <Ionicons name="play" size={14} color="#000" style={{ marginRight: 7 }} />
-                <Text style={s.playBtnText}>Play</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          {status !== 'quota_exceeded' && (
+            <TouchableOpacity
+              style={[s.playBtn, (!script || isGenerating) && s.playBtnDimmed]}
+              onPress={handlePlay}
+              disabled={!script || isGenerating}
+              activeOpacity={0.88}
+            >
+              {isGenerating ? (
+                <>
+                  <ActivityIndicator size="small" color="#000" style={{ marginRight: 8 }} />
+                  <Text style={s.playBtnText}>{STATUS_LABELS[status]}</Text>
+                </>
+              ) : (
+                <>
+                  <Ionicons name="play" size={14} color="#000" style={{ marginRight: 7 }} />
+                  <Text style={s.playBtnText}>Play</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
 
           {/* Tabs */}
           <View style={s.tabRow}>
@@ -399,6 +418,16 @@ const s = StyleSheet.create({
   statItem:    { flexDirection: 'row', alignItems: 'center', gap: 9 },
   statNum:     { fontSize: 22, fontWeight: '600', color: '#fff' },
   statDivider: { width: 1, height: 22, backgroundColor: 'rgba(255,255,255,0.18)' },
+
+  // Quota exceeded
+  quotaBanner: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+    backgroundColor: 'rgba(244,162,74,0.12)',
+    borderWidth: 1, borderColor: 'rgba(244,162,74,0.30)',
+    borderRadius: 16, padding: 16,
+  },
+  quotaTitle: { fontSize: 14, fontWeight: '700', color: '#F4A24A', marginBottom: 4 },
+  quotaSub:   { fontSize: 12, color: 'rgba(255,255,255,0.55)', lineHeight: 17 },
 
   // Play button
   playBtn: {

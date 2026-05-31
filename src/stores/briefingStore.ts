@@ -8,7 +8,8 @@ export type BriefingStatus =
   | 'generating_script'  // Claude writing
   | 'generating_audio'   // TTS rendering
   | 'ready'              // audio ready to play
-  | 'error';
+  | 'error'
+  | 'quota_exceeded';    // Gemini API 429 — daily limit reached
 
 interface BriefingStore {
   status:        BriefingStatus;
