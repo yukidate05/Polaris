@@ -23,9 +23,13 @@ export interface UserContext {
 
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
+// Circuit breaker: skip memory extraction for the session if quota is exceeded
+let memoryQuotaExceeded = false;
+
 async function callGemini(prompt: string): Promise<string> {
   const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
   if (!apiKey) throw new Error('no_key');
+  if (memoryQuotaExceeded) throw new Error('gemini-memory:quota_exceeded');
   const resp = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -34,7 +38,13 @@ async function callGemini(prompt: string): Promise<string> {
       generationConfig: { maxOutputTokens: 1000, thinkingConfig: { thinkingBudget: 0 } },
     }),
   });
-  if (!resp.ok) throw new Error(`gemini-memory:${resp.status}`);
+  if (!resp.ok) {
+    if (resp.status === 429) {
+      memoryQuotaExceeded = true;
+      console.warn('[memory] quota exceeded — skipping memory extraction for this session');
+    }
+    throw new Error(`gemini-memory:${resp.status}`);
+  }
   const data = await resp.json();
   return data.candidates[0].content.parts[0].text as string;
 }

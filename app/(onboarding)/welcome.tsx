@@ -23,7 +23,7 @@ export default function WelcomeScreen() {
             <Text style={styles.subtitle}>あなたの北極星</Text>
             <View style={styles.divider} />
             <Text style={styles.description}>
-              {'AIがあなたに合わせて、\nその日の予定やニュースをまとめて\n毎朝優しくお届けします。'}
+              {'AIがあなたに合わせて、\nその日の予定やニュースをまとめて\nいつでも優しくお届けします。'}
             </Text>
           </View>
 
@@ -82,7 +82,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 38,
     fontWeight: '800',
-    color: Colors.text.primary,
+    color: '#ffffff',
     lineHeight: 48,
     letterSpacing: -0.5,
     marginTop: 8,
@@ -90,18 +90,18 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     fontWeight: '500',
-    color: Colors.text.brand,
+    color: 'rgba(160,255,220,0.95)',
   },
   divider: {
     width: 32,
     height: 2,
-    backgroundColor: Colors.brand.primary,
+    backgroundColor: 'rgba(255,255,255,0.45)',
     borderRadius: 1,
     marginVertical: 4,
   },
   description: {
     fontSize: 15,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.72)',
     lineHeight: 24,
   },
   bottom: {
@@ -111,11 +111,11 @@ const styles = StyleSheet.create({
   brandName: {
     fontSize: 22,
     fontWeight: '700',
-    color: Colors.brand.primary,
+    color: 'rgba(160,255,220,0.95)',
   },
   tagline: {
     fontSize: 13,
-    color: Colors.text.tertiary,
+    color: 'rgba(255,255,255,0.50)',
     marginBottom: 20,
   },
   actions: {

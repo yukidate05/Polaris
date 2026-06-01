@@ -19,6 +19,13 @@ export interface ClaudeBriefingResult {
   fullText: string;
 }
 
+function podcastName(hour: number): string {
+  if (hour >= 5  && hour < 12) return 'モーニングブリーフィング';
+  if (hour >= 12 && hour < 17) return 'デイリーブリーフィング';
+  if (hour >= 17 && hour < 21) return 'イブニングブリーフィング';
+  return 'ナイトブリーフィング';
+}
+
 function timeContext(hour: number): string {
   if (hour >= 5  && hour < 9)  return `今は${hour}時。もう起きてる？電車の中かな`;
   if (hour >= 9  && hour < 12) return `今は${hour}時。もう会社かな？`;
@@ -96,7 +103,7 @@ export const claudeService = {
 
     const returningNote = params.isReturning
       ? `${params.userName}さんは本日すでにブリーフィングを聴いており、また戻ってきました。openingの最初のセリフはAriaが「お帰り、${params.userName}！また来てくれたね」から始めてください。`
-      : `openingの最初のセリフはAriaが「${tc}。今日は${dateStr}、${params.userName}のモーニングポッドキャストへようこそ！」から始めてください。`;
+      : `openingの最初のセリフはAriaが「${tc}。今日は${dateStr}、${params.userName}の${podcastName(params.currentHour)}へようこそ！」から始めてください。`;
 
     const ctx = params.userContext;
     const contextBlock = ctx ? `
