@@ -117,12 +117,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 32,
     fontWeight: '800',
-    color: Colors.text.primary,
+    color: '#ffffff',
     letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: 16,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.72)',
   },
   card: {
     width: '100%',
@@ -132,12 +132,12 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 17,
     fontWeight: '700',
-    color: Colors.text.primary,
+    color: '#ffffff',
     textAlign: 'center',
   },
   cardSubtitle: {
     fontSize: 12,
-    color: Colors.text.tertiary,
+    color: 'rgba(255,255,255,0.50)',
     textAlign: 'center',
     lineHeight: 18,
   },
