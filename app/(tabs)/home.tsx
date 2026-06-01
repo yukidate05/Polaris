@@ -402,9 +402,11 @@ const s = StyleSheet.create({
   section:      { gap: 10 },
   sectionLabel: { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.42)', letterSpacing: 0.5 },
 
-  // List card (shared by email and schedule)
+  // List card — dark glass (Huxe style)
   listCard: {
-    backgroundColor: '#111', borderRadius: 16, overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderRadius: 16, overflow: 'hidden',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.11)',
   },
   rowBorder: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.07)' },
 
@@ -421,13 +423,15 @@ const s = StyleSheet.create({
   schedTitle:{ fontSize: 13, fontWeight: '600', color: '#fff' },
   schedLoc:  { fontSize: 11, color: 'rgba(255,255,255,0.38)', marginTop: 2 },
 
-  // Search bar
+  // Search bar — dark glass pill
   searchBar: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#1C1C1C', borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 24, borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
     paddingHorizontal: 16, paddingVertical: 13,
   },
-  searchPlaceholder: { fontSize: 15, color: 'rgba(255,255,255,0.38)' },
+  searchPlaceholder: { fontSize: 15, color: 'rgba(255,255,255,0.35)' },
 
   // Discover section
   discSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },

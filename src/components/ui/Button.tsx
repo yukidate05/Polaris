@@ -3,12 +3,10 @@ import {
   Text,
   ActivityIndicator,
   StyleSheet,
+  View,
   ViewStyle,
   TextStyle,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Colors } from '@constants/colors';
-import { BorderRadius } from '@constants/index';
 
 interface ButtonProps {
   onPress: () => void;
@@ -38,21 +36,20 @@ export function Button({
       <TouchableOpacity
         onPress={onPress}
         disabled={isDisabled}
-        activeOpacity={0.85}
-        style={[fullWidth && { width: '100%' }, style]}
+        activeOpacity={0.88}
+        style={[
+          styles.base,
+          styles.primary,
+          isDisabled && styles.disabled,
+          fullWidth && { width: '100%' },
+          style,
+        ]}
       >
-        <LinearGradient
-          colors={['#4ECDC4', '#0D9488']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={[styles.base, styles.primary, isDisabled && styles.disabled]}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <Text style={[styles.primaryText, textStyle]}>{label}</Text>
-          )}
-        </LinearGradient>
+        {loading ? (
+          <ActivityIndicator color="#000" size="small" />
+        ) : (
+          <Text style={[styles.primaryText, textStyle]}>{label}</Text>
+        )}
       </TouchableOpacity>
     );
   }
@@ -62,7 +59,7 @@ export function Button({
       <TouchableOpacity
         onPress={onPress}
         disabled={isDisabled}
-        activeOpacity={0.85}
+        activeOpacity={0.80}
         style={[
           styles.base,
           styles.secondary,
@@ -72,7 +69,7 @@ export function Button({
         ]}
       >
         {loading ? (
-          <ActivityIndicator color={Colors.brand.primary} size="small" />
+          <ActivityIndicator color="rgba(255,255,255,0.8)" size="small" />
         ) : (
           <Text style={[styles.secondaryText, textStyle]}>{label}</Text>
         )}
@@ -80,11 +77,12 @@ export function Button({
     );
   }
 
+  // Ghost
   return (
     <TouchableOpacity
       onPress={onPress}
       disabled={isDisabled}
-      activeOpacity={0.7}
+      activeOpacity={0.65}
       style={[isDisabled && styles.disabled, style]}
     >
       <Text style={[styles.ghostText, textStyle]}>{label}</Text>
@@ -92,37 +90,81 @@ export function Button({
   );
 }
 
+// ── Circular icon button (Huxe-style ×, ←, settings) ─────────────────────────
+interface CircleButtonProps {
+  onPress: () => void;
+  children: React.ReactNode;
+  size?: number;
+  style?: ViewStyle;
+}
+
+export function CircleButton({ onPress, children, size = 38, style }: CircleButtonProps) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.75}
+      style={[
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: 'rgba(255,255,255,0.12)',
+          borderWidth: 1,
+          borderColor: 'rgba(255,255,255,0.18)',
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        style,
+      ]}
+    >
+      {children}
+    </TouchableOpacity>
+  );
+}
+
 const styles = StyleSheet.create({
   base: {
     height: 52,
-    borderRadius: BorderRadius['2xl'],
+    borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
-  primary: {},
-  secondary: {
-    backgroundColor: 'transparent',
-    borderWidth: 1.5,
-    borderColor: Colors.brand.primary,
-  },
-  disabled: {
-    opacity: 0.5,
+
+  // Huxe primary: solid white pill, dark text
+  primary: {
+    backgroundColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 3,
   },
   primaryText: {
-    color: '#fff',
+    color: '#0A0A0A',
     fontSize: 16,
     fontWeight: '600',
-    letterSpacing: 0.2,
+    letterSpacing: 0.1,
+  },
+
+  // Dark glass secondary
+  secondary: {
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.20)',
   },
   secondaryText: {
-    color: Colors.brand.primary,
+    color: 'rgba(255,255,255,0.88)',
     fontSize: 16,
     fontWeight: '600',
   },
+
+  // Ghost — subtle white text
   ghostText: {
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.50)',
     fontSize: 15,
     fontWeight: '500',
   },
+
+  disabled: { opacity: 0.45 },
 });

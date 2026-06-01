@@ -265,7 +265,7 @@ export default function PlayerScreen() {
               <Text style={styles.skipLabel}>15</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={handlePlayPause} style={styles.playBtn} activeOpacity={0.85}>
-              <Ionicons name={isPlaying ? 'pause' : 'play'} size={30} color="#fff"
+              <Ionicons name={isPlaying ? 'pause' : 'play'} size={30} color="#0A0A0A"
                 style={!isPlaying ? { marginLeft: 4 } : undefined} />
             </TouchableOpacity>
             <TouchableOpacity onPress={() => handleSkip(15)} style={styles.skipBtn}>
@@ -292,7 +292,12 @@ const styles = StyleSheet.create({
   emptyBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
 
   nav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 12 },
-  navBtn:    { width: 40, alignItems: 'center' },
+  navBtn: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)',
+    alignItems: 'center', justifyContent: 'center',
+  },
   navCenter: { alignItems: 'center', gap: 2 },
   navTitle:  { fontSize: 15, fontWeight: '700', color: '#fff' },
   navSub:    { fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: '500' },
@@ -356,9 +361,9 @@ const styles = StyleSheet.create({
   skipLabel:   { fontSize: 8, fontWeight: '700', color: 'rgba(255,255,255,0.4)', position: 'absolute', bottom: 6 },
   playBtn: {
     width: 68, height: 68, borderRadius: 34,
-    backgroundColor: Colors.brand.primary,
+    backgroundColor: '#ffffff',
     alignItems: 'center', justifyContent: 'center',
-    shadowColor: Colors.brand.primary, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 8,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.30, shadowRadius: 16, elevation: 8,
   },
   rateText: { fontSize: 14, fontWeight: '700', color: 'rgba(255,255,255,0.6)' },
 });

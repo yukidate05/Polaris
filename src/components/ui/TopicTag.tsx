@@ -1,5 +1,4 @@
 import { TouchableOpacity, Text, StyleSheet } from 'react-native';
-import { Colors } from '@constants/colors';
 
 interface TopicTagProps {
   label: string;
@@ -21,25 +20,26 @@ export function TopicTag({ label, selected = false, onPress }: TopicTagProps) {
 
 const styles = StyleSheet.create({
   tag: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.75)',
+    backgroundColor: 'rgba(255,255,255,0.09)',
     borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.07)',
+    borderColor: 'rgba(255,255,255,0.16)',
     marginRight: 8,
     marginBottom: 8,
   },
   tagSelected: {
-    backgroundColor: Colors.brand.primary,
-    borderColor: Colors.brand.primary,
+    backgroundColor: 'rgba(0,230,180,0.22)',
+    borderColor: 'rgba(0,230,180,0.55)',
   },
   label: {
     fontSize: 13,
     fontWeight: '500',
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.65)',
   },
   labelSelected: {
-    color: '#fff',
+    color: 'rgba(160,255,220,0.98)',
+    fontWeight: '600',
   },
 });
