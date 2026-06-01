@@ -101,13 +101,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 30,
     fontWeight: '800',
-    color: Colors.text.primary,
+    color: '#ffffff',
     lineHeight: 40,
     letterSpacing: -0.3,
   },
   subtitle: {
     fontSize: 14,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.72)',
     lineHeight: 22,
   },
   features: { gap: 12 },
@@ -129,12 +129,12 @@ const styles = StyleSheet.create({
   featureTitle: {
     fontSize: 15,
     fontWeight: '600',
-    color: Colors.text.primary,
+    color: '#ffffff',
     marginBottom: 4,
   },
   featureDescription: {
     fontSize: 13,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.68)',
     lineHeight: 20,
   },
   actions: { gap: 8, marginTop: 8 },

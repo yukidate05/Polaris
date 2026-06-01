@@ -111,13 +111,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 30,
     fontWeight: '800',
-    color: Colors.text.primary,
+    color: '#ffffff',
     lineHeight: 40,
     letterSpacing: -0.3,
   },
   subtitle: {
     fontSize: 14,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.72)',
     lineHeight: 22,
   },
   tags: {
@@ -127,7 +127,7 @@ const styles = StyleSheet.create({
   },
   selectedCount: {
     fontSize: 13,
-    color: Colors.text.brand,
+    color: 'rgba(160,255,220,0.95)',
     fontWeight: '500',
   },
   actions: { gap: 8 },
