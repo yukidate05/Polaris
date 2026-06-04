@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Connecting to Polaris...</title>
+  <style>
+    body { background: #0a0a1a; color: #fff; font-family: sans-serif;
+           display: flex; align-items: center; justify-content: center;
+           height: 100vh; margin: 0; text-align: center; }
+    p { color: rgba(255,255,255,0.6); font-size: 14px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div>
+    <h2>Polarisに戻っています...</h2>
+    <p>このページは自動的に閉じられます。</p>
+  </div>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const code  = params.get('code');
+    const error = params.get('error');
+    if (code) {
+      window.location.href = 'polaris://slack-callback?code=' + encodeURIComponent(code);
+    } else if (error) {
+      window.location.href = 'polaris://slack-callback?error=' + encodeURIComponent(error);
+    }
+  </script>
+</body>
+</html>
