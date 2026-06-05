@@ -1,4 +1,5 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useRef } from 'react';
+import { useFocusEffect } from 'expo-router';
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, ActivityIndicator, Dimensions,
@@ -7,11 +8,17 @@ import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { AuroraBackground } from '@components/ui';
+import { AuroraBackground, PaywallModal, SubscriptionStatusBanner } from '@components/ui';
 import { useAuthStore } from '@stores/authStore';
+import { subscriptionService, type AccessStatus } from '@services/subscriptionService';
+import { checkIsPro } from '@lib/revenuecat';
 import { useBriefingStore, type BriefingStatus } from '@stores/briefingStore';
+import { useUserPreferencesStore } from '@stores/userPreferencesStore';
 import { googleDataService, MOCK_GOOGLE_DATA } from '@services/googleDataService';
 import { briefingService } from '@services/briefingService';
+import { sessionService } from '@services/sessionService';
+import { bgmService } from '@services/bgmService';
+import { useT } from '@/i18n';
 import Constants from 'expo-constants';
 
 const { height: SCREEN_H } = Dimensions.get('window');
@@ -23,10 +30,10 @@ const MONTHS = [
   'July','August','September','October','November','December',
 ];
 
-function getGreeting(h: number) {
-  if (h < 12) return 'Good Morning';
-  if (h < 17) return 'Good Afternoon';
-  return 'Good Evening';
+function getGreetingKey(h: number) {
+  if (h < 12) return 'good_morning' as const;
+  if (h < 17) return 'good_afternoon' as const;
+  return 'good_evening' as const;
 }
 
 function formatDate() {
@@ -34,22 +41,16 @@ function formatDate() {
   return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
 }
 
-const STATUS_LABELS: Record<BriefingStatus, string> = {
-  idle:              'Preparing...',
-  fetching:          'Fetching data...',
-  generating_script: 'Writing script...',
-  generating_audio:  'Generating audio...',
-  ready:             'Ready to play',
-  error:             'Error occurred',
-  quota_exceeded:    '今日の利用上限に達しました',
+const STATUS_KEYS: Record<BriefingStatus, 'status_idle'|'status_fetching'|'status_script'|'status_audio'|'status_ready'|'status_error'|'status_quota'> = {
+  idle:              'status_idle',
+  fetching:          'status_fetching',
+  generating_script: 'status_script',
+  generating_audio:  'status_audio',
+  ready:             'status_ready',
+  error:             'status_error',
+  quota_exceeded:    'status_quota',
 };
 
-const DISCOVER_CARDS = [
-  { id: '1', title: 'AI ニュース',  desc: "Today's top AI headlines", c1: '#5B8DB8', c2: '#3A6690' },
-  { id: '2', title: 'マーケット',   desc: 'Market trends & insights',  c1: '#B85B5B', c2: '#8F3A3A' },
-  { id: '3', title: 'テック',       desc: "What's shaping tech",        c1: '#5BB87A', c2: '#3A8F58' },
-  { id: '4', title: 'ビジネス',     desc: 'Business & economy',        c1: '#B8975B', c2: '#8F723A' },
-];
 
 // ── Sub-components ──────────────────────────────────────────────────────────────
 
@@ -66,21 +67,13 @@ function ScheduleRow({ ev }: { ev: { title: string; startTime: string; location?
   );
 }
 
-function DiscoverCard({ title, desc, c1, c2 }: { title: string; desc: string; c1: string; c2: string }) {
-  return (
-    <TouchableOpacity activeOpacity={0.8} style={s.discCard}>
-      <LinearGradient colors={[c1, c2]} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
-      <Text style={s.discTitle}>{title}</Text>
-      <Text style={s.discDesc} numberOfLines={2}>{desc}</Text>
-    </TouchableOpacity>
-  );
-}
 
 // ── Main ────────────────────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const { user, profile, googleAccessToken } = useAuthStore();
+  const { user, profile, googleAccessToken, googleTokenResolved } = useAuthStore();
+  const { selectedHostIds, preferences } = useUserPreferencesStore();
   const {
     status, googleData, script, hasPlayed,
     setStatus, setGoogleData, setScript, setError, setHasPlayed,
@@ -90,18 +83,29 @@ export default function HomeScreen() {
     ?? user?.displayName?.split(' ')[0]
     ?? 'Guest';
 
+  const t = useT();
   const hour     = new Date().getHours();
-  const greeting = getGreeting(hour);
+  const greeting = t(getGreetingKey(hour));
   const dateStr  = formatDate();
 
   const isGenerating = ['fetching', 'generating_script', 'generating_audio'].includes(status);
-  const [activeTab, setActiveTab] = useState<'foryou' | 'discover'>('foryou');
+  const activeTab = 'foryou';
+  const [paywallVisible, setPaywallVisible] = useState(false);
+  const [paywallStatus,  setPaywallStatus]  = useState<AccessStatus | null>(null);
 
   const generateBriefing = useCallback(async () => {
     if (isGenerating) return;
+
+    // ── 1. まずGoogleデータを取得（アクセス制限に関わらず） ──────────
     setStatus('fetching');
     let data = googleData;
     try {
+      const sessionData = user?.uid
+        ? await sessionService.get(user.uid).catch(() => null)
+        : null;
+
+      if (user?.uid) sessionService.markOpened(user.uid);
+
       if (!data) {
         if (isExpoGo || !googleAccessToken) {
           await new Promise((r) => setTimeout(r, 600));
@@ -111,10 +115,37 @@ export default function HomeScreen() {
         }
         setGoogleData(data);
       }
+
+      // ── 2. アクセス制御チェック（データ取得後） ──────────────────────
+      let userIsPro = false;
+      if (user?.uid) {
+        const [isPro, access] = await Promise.all([
+          checkIsPro(),
+          subscriptionService.checkAccess(user.uid, false),
+        ]);
+        userIsPro = isPro || access.reason === 'pro';
+        const finalAccess = userIsPro
+          ? { allowed: true, reason: 'pro' as const, trialDaysLeft: 0, cooldownDaysLeft: 0 }
+          : access;
+
+        if (!finalAccess.allowed) {
+          setStatus('idle');
+          setPaywallStatus(finalAccess);
+          setPaywallVisible(true);
+          return;
+        }
+      }
+
+      // ── 3. スクリプト・音声生成 ───────────────────────────────────────
       setStatus('generating_script');
-      const sc = await briefingService.generate(data, firstName, [], hasPlayed, user?.uid ?? undefined);
+      const lang = useUserPreferencesStore.getState().preferences.language;
+      const sc = await briefingService.generate(
+        data, firstName, [], hasPlayed, user?.uid ?? undefined, sessionData, selectedHostIds, userIsPro, lang
+      );
       setScript(sc);
+      if (user?.uid) subscriptionService.recordGeneration(user.uid);
     } catch (e: any) {
+      bgmService.stop();
       const msg = e?.message ?? '';
       if (msg.includes('429') || msg.includes('quota_exceeded')) {
         setStatus('quota_exceeded');
@@ -124,12 +155,28 @@ export default function HomeScreen() {
     }
   }, [isGenerating, googleData, googleAccessToken, firstName, hasPlayed]);
 
-  useEffect(() => {
-    if (status === 'idle') generateBriefing();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      bgmService.play();
+    }, [])
+  );
 
-  const handlePlay = () => {
-    if (script) { setHasPlayed(true); router.push('/player'); }
+  const generateBriefingRef = useRef(generateBriefing);
+  useEffect(() => { generateBriefingRef.current = generateBriefing; });
+
+  const hasAutoTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (status === 'idle' && googleTokenResolved && !hasAutoTriggeredRef.current) {
+      hasAutoTriggeredRef.current = true;
+      generateBriefingRef.current();
+    }
+  }, [status, googleTokenResolved]);
+
+  const handlePlay = async () => {
+    if (!script) return;
+    setHasPlayed(true);
+    await bgmService.fadeOutAndStop();
+    router.push('/player');
   };
 
   const unread      = googleData?.unreadCount         ?? 0;
@@ -140,6 +187,12 @@ export default function HomeScreen() {
 
   return (
     <View style={s.root}>
+      <PaywallModal
+        visible={paywallVisible}
+        status={paywallStatus}
+        onUpgrade={() => { setPaywallVisible(false); router.push('/(tabs)/settings'); }}
+        onDismiss={() => setPaywallVisible(false)}
+      />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scrollContent} bounces>
 
         {/* ── Hero ── */}
@@ -171,6 +224,9 @@ export default function HomeScreen() {
         {/* ── Below hero ── */}
         <View style={s.below}>
 
+          {/* サブスクステータス */}
+          <SubscriptionStatusBanner />
+
           {/* Stats bar */}
           <View style={s.statsBar}>
             <View style={s.statItem}>
@@ -189,8 +245,8 @@ export default function HomeScreen() {
             <View style={s.quotaBanner}>
               <Ionicons name="alert-circle-outline" size={20} color="#F4A24A" />
               <View style={{ flex: 1 }}>
-                <Text style={s.quotaTitle}>今日はこれ以上生成できません</Text>
-                <Text style={s.quotaSub}>Gemini APIの無料枠を使い切りました。明日リセットされます。</Text>
+                <Text style={s.quotaTitle}>{t('quota_title')}</Text>
+                <Text style={s.quotaSub}>{t('quota_sub')}</Text>
               </View>
             </View>
           )}
@@ -206,12 +262,12 @@ export default function HomeScreen() {
               {isGenerating ? (
                 <>
                   <ActivityIndicator size="small" color="#000" style={{ marginRight: 8 }} />
-                  <Text style={s.playBtnText}>{STATUS_LABELS[status]}</Text>
+                  <Text style={s.playBtnText}>{t(STATUS_KEYS[status])}</Text>
                 </>
               ) : (
                 <>
                   <Ionicons name="play" size={14} color="#000" style={{ marginRight: 7 }} />
-                  <Text style={s.playBtnText}>Play</Text>
+                  <Text style={s.playBtnText}>{t('play')}</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -219,14 +275,10 @@ export default function HomeScreen() {
 
           {/* Tabs */}
           <View style={s.tabRow}>
-            <TouchableOpacity style={s.tabItem} onPress={() => setActiveTab('foryou')}>
-              <Text style={[s.tabLabel, activeTab === 'foryou' && s.tabLabelOn]}>For You</Text>
-              {activeTab === 'foryou' && <View style={s.tabUnderline} />}
-            </TouchableOpacity>
-            <TouchableOpacity style={s.tabItem} onPress={() => setActiveTab('discover')}>
-              <Text style={[s.tabLabel, activeTab === 'discover' && s.tabLabelOn]}>Discover</Text>
-              {activeTab === 'discover' && <View style={s.tabUnderline} />}
-            </TouchableOpacity>
+            <View style={s.tabItem}>
+              <Text style={[s.tabLabel, s.tabLabelOn]}>{t('for_you')}</Text>
+              <View style={s.tabUnderline} />
+            </View>
             <TouchableOpacity
               style={s.tabRefresh}
               onPress={generateBriefing}
@@ -237,13 +289,13 @@ export default function HomeScreen() {
           </View>
 
           {/* Tab body */}
-          {activeTab === 'foryou' ? (
+          {activeTab === 'foryou' && (
             <View style={s.tabBody}>
 
               {/* Email highlights */}
               {topEmails.length > 0 && (
                 <View style={s.section}>
-                  <Text style={s.sectionLabel}>✉  今日のメール</Text>
+                  <Text style={s.sectionLabel}>✉  {t('todays_mail')}</Text>
                   <View style={s.listCard}>
                     {topEmails.slice(0, 3).map((e, i) => (
                       <View key={i} style={[s.emailRow, i > 0 && s.rowBorder]}>
@@ -261,7 +313,7 @@ export default function HomeScreen() {
               {/* Today's schedule */}
               {todayEvs.length > 0 && (
                 <View style={s.section}>
-                  <Text style={s.sectionLabel}>📅  今日の予定</Text>
+                  <Text style={s.sectionLabel}>📅  {t('todays_schedule')}</Text>
                   <View style={s.listCard}>
                     {todayEvs.slice(0, 4).map((ev, i) => (
                       <View key={i} style={i > 0 ? s.rowBorder : undefined}>
@@ -275,7 +327,7 @@ export default function HomeScreen() {
               {/* Tomorrow */}
               {tomorrowEvs.length > 0 && (
                 <View style={s.section}>
-                  <Text style={s.sectionLabel}>🌙  明日の予定</Text>
+                  <Text style={s.sectionLabel}>🌙  {t('tomorrows_schedule')}</Text>
                   <View style={s.listCard}>
                     {tomorrowEvs.slice(0, 4).map((ev, i) => (
                       <View key={i} style={i > 0 ? s.rowBorder : undefined}>
@@ -289,30 +341,10 @@ export default function HomeScreen() {
               {/* Empty state */}
               {topEmails.length === 0 && todayEvs.length === 0 && !isGenerating && (
                 <View style={s.emptyState}>
-                  <Text style={s.emptyText}>今日のデータを読み込んでいます</Text>
+                  <Text style={s.emptyText}>{t('loading_data')}</Text>
                 </View>
               )}
 
-            </View>
-          ) : (
-            <View style={s.tabBody}>
-              {/* Search bar */}
-              <View style={s.searchBar}>
-                <Ionicons name="search-outline" size={16} color="rgba(255,255,255,0.45)" style={{ marginRight: 8 }} />
-                <Text style={s.searchPlaceholder}>Find new shows</Text>
-              </View>
-              {/* News section */}
-              <View>
-                <View style={s.discSectionHeader}>
-                  <Ionicons name="trending-up-outline" size={14} color="rgba(255,255,255,0.55)" />
-                  <Text style={s.discSectionLabel}>News</Text>
-                </View>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <View style={s.discRow}>
-                    {DISCOVER_CARDS.map((c) => <DiscoverCard key={c.id} {...c} />)}
-                  </View>
-                </ScrollView>
-              </View>
             </View>
           )}
 
@@ -422,30 +454,6 @@ const s = StyleSheet.create({
   schedDot:  { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.55)' },
   schedTitle:{ fontSize: 13, fontWeight: '600', color: '#fff' },
   schedLoc:  { fontSize: 11, color: 'rgba(255,255,255,0.38)', marginTop: 2 },
-
-  // Search bar — dark glass pill
-  searchBar: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 24, borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    paddingHorizontal: 16, paddingVertical: 13,
-  },
-  searchPlaceholder: { fontSize: 15, color: 'rgba(255,255,255,0.35)' },
-
-  // Discover section
-  discSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
-  discSectionLabel:  { fontSize: 14, fontWeight: '700', color: 'rgba(255,255,255,0.70)' },
-  discRow:  { flexDirection: 'row', gap: 12, paddingBottom: 4 },
-  discCard: {
-    width: 175, height: 170, borderRadius: 16,
-    overflow: 'hidden', padding: 14, justifyContent: 'flex-end',
-  },
-  discTitle: {
-    fontSize: 15, fontWeight: '700', color: '#fff',
-    textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
-  },
-  discDesc: { fontSize: 11, color: 'rgba(255,255,255,0.78)', marginTop: 3, lineHeight: 16 },
 
   // Empty
   emptyState: { alignItems: 'center', paddingVertical: 32 },

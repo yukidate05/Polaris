@@ -8,6 +8,7 @@ import { BlurView } from 'expo-blur';
 interface GlassCardProps {
   children: React.ReactNode;
   style?: ViewStyle;
+  contentStyle?: ViewStyle;
   padding?: number;
   intensity?: number;
   radius?: number;
@@ -16,8 +17,9 @@ interface GlassCardProps {
 export function GlassCard({
   children,
   style,
+  contentStyle,
   padding = 18,
-  intensity = 55,
+  intensity = 50,
   radius = 20,
 }: GlassCardProps) {
   return (
@@ -25,7 +27,7 @@ export function GlassCard({
       <View style={[styles.clipper, { borderRadius: radius }]}>
         <BlurView intensity={intensity} tint="dark" style={StyleSheet.absoluteFill} />
         <View style={styles.tint} pointerEvents="none" />
-        <View style={{ padding }}>
+        <View style={[{ padding }, contentStyle]}>
           {children}
         </View>
       </View>
@@ -39,29 +41,30 @@ export const FrostCard = GlassCard;
 const styles = StyleSheet.create({
   shadow: {
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.30,
-    shadowRadius: 24,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    elevation: 0,
   },
   clipper: {
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.3)',
+    backgroundColor: 'rgba(255,255,255,0.15)',
   },
   tint: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'transparent',
   },
 });
 
 // ── Style tokens ───────────────────────────────────────────────────────────────
 export const card: ViewStyle = {
   shadowColor: '#000',
-  shadowOffset: { width: 0, height: 8 },
-  shadowOpacity: 0.30,
-  shadowRadius: 24,
-  elevation: 8,
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 0.22,
+  shadowRadius: 16,
+  elevation: 3,
   borderRadius: 20,
 };
 

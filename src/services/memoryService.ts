@@ -1,6 +1,7 @@
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@lib/firebase';
 import type { GoogleData } from './googleDataService';
+import { callFunction } from './functionsService';
 
 export interface ContactMemory {
   name:          string;
@@ -21,32 +22,25 @@ export interface UserContext {
   pendingFollowups: FollowupMemory[];
 }
 
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
-
 // Circuit breaker: skip memory extraction for the session if quota is exceeded
 let memoryQuotaExceeded = false;
 
 async function callGemini(prompt: string): Promise<string> {
-  const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-  if (!apiKey) throw new Error('no_key');
   if (memoryQuotaExceeded) throw new Error('gemini-memory:quota_exceeded');
-  const resp = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 1000, thinkingConfig: { thinkingBudget: 0 } },
-    }),
-  });
-  if (!resp.ok) {
-    if (resp.status === 429) {
+  try {
+    const { text } = await callFunction<{ text: string }>('gemini', {
+      prompt,
+      systemPrompt: 'You are a memory extraction assistant. Output JSON only.',
+    });
+    return text;
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes('429')) {
       memoryQuotaExceeded = true;
       console.warn('[memory] quota exceeded — skipping memory extraction for this session');
     }
-    throw new Error(`gemini-memory:${resp.status}`);
+    throw new Error(`gemini-memory: ${msg}`);
   }
-  const data = await resp.json();
-  return data.candidates[0].content.parts[0].text as string;
 }
 
 export const memoryService = {
@@ -125,7 +119,9 @@ JSONのみ返してください:
       await this.saveContext(uid, ctx);
       console.log('[memory] saved:', ctx.inferredRole, '/ contacts:', ctx.frequentContacts.length);
     } catch (err) {
-      console.error('[memory] extract failed:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('429') || msg.includes('quota_exceeded')) return; // callGemini側でwarn済み
+      console.warn('[memory] extract failed:', msg);
     }
   },
 };

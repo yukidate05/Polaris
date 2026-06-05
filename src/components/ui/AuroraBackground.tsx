@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { View, Animated, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { StarField } from './StarField';
 
 // ── Time-of-day aurora themes ──────────────────────────────────────────────────
 
@@ -98,7 +99,7 @@ export function AuroraBackground() {
   return (
     <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.bg }]}>
       <LinearGradient
-        colors={theme.base as string[]}
+        colors={theme.base as [string, string, string]}
         locations={[0, 0.5, 1]}
         style={StyleSheet.absoluteFill}
       />
@@ -109,7 +110,7 @@ export function AuroraBackground() {
         return (
           <Animated.View key={i} style={[StyleSheet.absoluteFill, { opacity, transform:[{translateY}] }]}>
             <LinearGradient
-              colors={band.colors}
+              colors={band.colors as [string, string, string, string]}
               start={pos.start}
               end={pos.end}
               style={StyleSheet.absoluteFill}
@@ -117,6 +118,9 @@ export function AuroraBackground() {
           </Animated.View>
         );
       })}
+
+      {/* オーロラの上に重なる星と接続線 */}
+      <StarField />
     </View>
   );
 }

@@ -25,7 +25,8 @@
       "package": "com.yukid.polaris",
       "googleServicesFile": "./google-services.json",
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "launchMode": "singleTask"
     },
     "web": {
       "favicon": "./assets/favicon.png"

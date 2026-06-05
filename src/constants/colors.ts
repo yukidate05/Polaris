@@ -32,11 +32,11 @@ export const Colors = {
   },
 
   text: {
-    primary:      '#1A2036',
-    secondary:    '#5F6A7A',
-    tertiary:     '#9AA5B4',
+    primary:      '#FFFFFF',
+    secondary:    'rgba(255,255,255,0.65)',
+    tertiary:     'rgba(255,255,255,0.38)',
     brand:        '#6B8CFF',
-    inverse:      '#FFFFFF',
+    inverse:      '#1A2036',
     dark:         '#1A2036',
     darkSecondary:'#5F6A7A',
     darkTertiary: '#9AA5B4',

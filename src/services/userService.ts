@@ -34,8 +34,11 @@ export const userService = {
 
     await setDoc(doc(db, 'users', user.uid), {
       ...profile,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      firstOpenedAt:            serverTimestamp(), // トライアル開始日
+      monthlyGenerationCount:   0,
+      monthlyGenerationResetAt: serverTimestamp(),
+      createdAt:                serverTimestamp(),
+      updatedAt:                serverTimestamp(),
     });
 
     return { ...profile, createdAt: new Date(), updatedAt: new Date() };

@@ -46,7 +46,7 @@ export function Button({
         ]}
       >
         {loading ? (
-          <ActivityIndicator color="#000" size="small" />
+          <ActivityIndicator color="#fff" size="small" />
         ) : (
           <Text style={[styles.primaryText, textStyle]}>{label}</Text>
         )}
@@ -131,30 +131,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
 
-  // Huxe primary: solid white pill, dark text
+  // Glass primary: glass-btn style
   primary: {
-    backgroundColor: '#ffffff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 3,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
   primaryText: {
-    color: '#0A0A0A',
+    color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
     letterSpacing: 0.1,
   },
 
-  // Dark glass secondary
+  // Glass secondary: slightly more subtle
   secondary: {
-    backgroundColor: 'rgba(255,255,255,0.10)',
+    backgroundColor: 'rgba(255,255,255,0.2)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.20)',
+    borderColor: 'rgba(255,255,255,0.3)',
   },
   secondaryText: {
-    color: 'rgba(255,255,255,0.88)',
+    color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
   },

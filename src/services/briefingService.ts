@@ -3,6 +3,7 @@ import { claudeService, type ChapterDraft, type DialogueTurn } from './claudeSer
 import { geminiTtsService } from './geminiTtsService';
 import { googleTtsService } from './googleTtsService';
 import { memoryService } from './memoryService';
+import type { SessionData } from './sessionService';
 
 export type { DialogueTurn };
 
@@ -21,6 +22,28 @@ export interface BriefingScript {
   audioUri:         string | null;
   topic:            string;
   dialogue:         DialogueTurn[];
+}
+
+// Split a long dialogue turn at Japanese sentence boundaries so each chunk
+// is ≤ maxLen characters. Applied to both template and Claude-generated content.
+function splitTurns(turns: import('./claudeService').DialogueTurn[], maxLen = 80): import('./claudeService').DialogueTurn[] {
+  const result: import('./claudeService').DialogueTurn[] = [];
+  for (const turn of turns) {
+    if (turn.text.length <= maxLen) { result.push(turn); continue; }
+    // Split at sentence-ending punctuation, keeping the delimiter
+    const segs = turn.text.split(/(?<=。|！|？|…|。」|！」|？」)/);
+    let chunk = '';
+    for (const seg of segs) {
+      if (chunk.length + seg.length > maxLen && chunk.length > 0) {
+        result.push({ speaker: turn.speaker, text: chunk });
+        chunk = seg;
+      } else {
+        chunk += seg;
+      }
+    }
+    if (chunk.trim()) result.push({ speaker: turn.speaker, text: chunk });
+  }
+  return result;
 }
 
 function todayString(): string {
@@ -48,42 +71,47 @@ function estimateChapterTimes(texts: string[], totalSec: number): number[] {
 function templateChapters(data: GoogleData, userName: string): ChapterDraft[] {
   const g  = greeting(new Date().getHours());
   const dt = todayString();
+  const d  = (text: string) => [{ speaker: 'A' as const, text }];
 
-  const emailText = data.unreadCount === 0
-    ? '未読メールはありません。受信トレイはきれいな状態です。'
+  const topMindText = data.unreadCount === 0
+    ? `${g}、${userName}さん。今日は${dt}です。未読メールはありません。今日も集中して取り組みましょう。`
     : (() => {
-        let t = `未読メールが${data.unreadCount}件あります。`;
-        data.topEmails.slice(0, 3).forEach((e, i) => {
-          t += `${i + 1}件目は${e.from}さんから「${e.subject}」というメールです。`;
-        });
+        let t = `${g}、${userName}さん。今日は${dt}です。未読メールが${data.unreadCount}件あります。`;
+        data.topEmails.slice(0, 2).forEach(e => { t += `${e.from}さんからの「${e.subject}」は要確認です。`; });
         return t;
       })();
 
-  const calText = data.todayEvents.length === 0
-    ? '今日の予定はありません。自由な一日をお楽しみください。'
+  const scheduleText = data.todayEvents.length === 0
+    ? '今日の予定はありません。自由な時間を有効に使いましょう。'
     : (() => {
         let t = `今日は${data.todayEvents.length}件の予定があります。`;
-        data.todayEvents.forEach((ev) => {
-          t += `${ev.startTime}から「${ev.title}」`;
-          if (ev.location) t += `、${ev.location}で`;
-          t += 'があります。';
+        data.todayEvents.slice(0, 3).forEach(ev => {
+          t += `${ev.startTime}から「${ev.title}」${ev.location ? `、${ev.location}で` : ''}があります。`;
         });
         return t;
       })();
 
-  const makeDlg = (text: string) => [{ speaker: 'A' as const, text }];
+  const lookingAheadText = data.tomorrowEvents.length === 0
+    ? '明日以降の予定は現在登録されていません。今のうちに準備を進めておきましょう。'
+    : (() => {
+        let t = '明日以降の予定を確認しましょう。';
+        data.tomorrowEvents.slice(0, 2).forEach(ev => { t += `「${ev.title}」があります。`; });
+        return t;
+      })();
 
   return [
-    { id: 'opening',  title: 'おはよう', iconName: 'sunny-outline',
-      text: `${g}、${userName}さん。今日は${dt}です。`,
-      dialogue: makeDlg(`${g}、${userName}さん。今日は${dt}です。`) },
-    { id: 'email',    title: 'メール',   iconName: 'mail-outline',
-      text: emailText, dialogue: makeDlg(emailText) },
-    { id: 'schedule', title: '予定',     iconName: 'calendar-outline',
-      text: calText,   dialogue: makeDlg(calText) },
-    { id: 'insights', title: 'インサイト', iconName: 'bulb-outline',
-      text: '今日も素晴らしい一日をお過ごしください。',
-      dialogue: makeDlg('今日も素晴らしい一日をお過ごしください。') },
+    { id: 'top_of_mind',   title: '最優先事項',       iconName: 'flame-outline',
+      text: topMindText,       dialogue: d(topMindText) },
+    { id: 'schedule',      title: '今日のスケジュール', iconName: 'calendar-outline',
+      text: scheduleText,      dialogue: d(scheduleText) },
+    { id: 'looking_ahead', title: '今後の展望',        iconName: 'telescope-outline',
+      text: lookingAheadText,  dialogue: d(lookingAheadText) },
+    { id: 'next_steps',    title: '推奨アクション',    iconName: 'checkmark-done-outline',
+      text: `今日の${userName}さんへの推奨アクションです。優先度の高いメールへの返信と、今日の予定の最終確認をしておきましょう。`,
+      dialogue: d(`今日の${userName}さんへの推奨アクションです。優先度の高いメールへの返信と、今日の予定の最終確認をしておきましょう。`) },
+    { id: 'relevant_news', title: '関連ニュース',      iconName: 'newspaper-outline',
+      text: '今日の業界動向や関連ニュースをお届けします。気になる情報はあとでチェックしてみてください。',
+      dialogue: d('今日の業界動向や関連ニュースをお届けします。気になる情報はあとでチェックしてみてください。') },
   ];
 }
 
@@ -94,28 +122,97 @@ export const briefingService = {
     interests:   string[] = [],
     isReturning: boolean  = false,
     uid?:        string,
+    sessionData?: SessionData | null,
+    hostIds?:    string[],
+    isPro?:      boolean,
+    language?:   string,
   ): Promise<BriefingScript> {
     const currentHour = new Date().getHours();
 
-    // 記憶を並行読み込み
-    const userContext = uid ? await memoryService.getContext(uid).catch(() => null) : null;
+    // 記憶・Notion・Slack・Teams・Chatworkデータを並行読み込み
+    const [userContext, notionPages, slackMessages, teamsChats, chatworkMessages] = await Promise.all([
+      uid ? memoryService.getContext(uid).catch(() => null) : Promise.resolve(null),
+      (async () => {
+        try {
+          const { notionService } = await import('./notionService');
+          const connected = await notionService.isConnected();
+          if (!connected) return null;
+          return await notionService.getPages();
+        } catch {
+          return null;
+        }
+      })(),
+      (async () => {
+        try {
+          const { slackService } = await import('./slackService');
+          const connected = await slackService.isConnected();
+          if (!connected) return null;
+          return await slackService.getRecentMessages();
+        } catch {
+          return null;
+        }
+      })(),
+      (async () => {
+        try {
+          const { teamsService } = await import('./teamsService');
+          const connected = await teamsService.isConnected();
+          if (!connected) return null;
+          return await teamsService.getRecentChats();
+        } catch {
+          return null;
+        }
+      })(),
+      (async () => {
+        try {
+          const { chatworkService } = await import('./chatworkService');
+          const connected = await chatworkService.isConnected();
+          if (!connected) return null;
+          return await chatworkService.getRecentMessages();
+        } catch {
+          return null;
+        }
+      })(),
+    ]);
 
     let rawChapters: ChapterDraft[];
     try {
-      const result = await claudeService.generateBriefing({
-        userName,
-        unreadCount:    data.unreadCount,
-        topEmails:      data.topEmails,
-        todayEvents:    data.todayEvents,
-        tomorrowEvents: data.tomorrowEvents,
-        interests,
-        currentHour,
-        isReturning,
-        userContext,
-      });
-      rawChapters = result.chapters;
+      // ブリーフィング + Pro向けニュースキャストを並行生成
+      const dataSparse = data.unreadCount <= 1 && data.todayEvents.length <= 1;
+      const newsPromise = isPro
+        ? claudeService.generateNewsCast({ userName, interests, currentHour, hostIds, language, sparseData: dataSparse })
+            .catch((e) => { console.error('[briefing] newsCast failed:', e); return null; })
+        : Promise.resolve(null);
+
+      const [briefingResult, newsResult] = await Promise.all([
+        claudeService.generateBriefing({
+          userName,
+          unreadCount:    data.unreadCount,
+          topEmails:      data.topEmails,
+          todayEvents:    data.todayEvents,
+          tomorrowEvents: data.tomorrowEvents,
+          interests,
+          currentHour,
+          isReturning,
+          userContext,
+          sessionData,
+          hostIds,
+          language,
+          notionPages:       notionPages ?? undefined,
+          slackMessages:     slackMessages ?? undefined,
+          teamsChats:        teamsChats ?? undefined,
+          chatworkMessages:  chatworkMessages ?? undefined,
+        }),
+        newsPromise,
+      ]);
+
+      rawChapters = [
+        ...briefingResult.chapters,
+        ...(newsResult?.chapters ?? []),
+      ];
     } catch (err) {
       console.error('[briefing] script generation failed:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('429') || msg.includes('quota')) throw err;
       rawChapters = templateChapters(data, userName);
     }
 
@@ -131,15 +228,15 @@ export const briefingService = {
       startSec: times[i],
     }));
 
-    // Build flat dialogue from all chapters
-    const allDialogue = rawChapters.flatMap((c) => c.dialogue ?? []);
+    // Build flat dialogue from all chapters, splitting any long turns
+    const allDialogue = splitTurns(rawChapters.flatMap((c) => c.dialogue ?? []));
 
     console.log('[briefing] dialogue turns:', allDialogue.length, 'fullText length:', fullText.length);
 
     let audioUri: string | null = null;
     try {
       audioUri = allDialogue.length > 0
-        ? await geminiTtsService.generateDialogueAudio(allDialogue)
+        ? await geminiTtsService.generateDialogueAudio(allDialogue, hostIds)
         : await googleTtsService.generateAudio(fullText);
     } catch (err) {
       console.error('[briefing] Gemini TTS failed, falling back to Google TTS:', err);

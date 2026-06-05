@@ -1,9 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import {
-  initializeAuth,
-  getAuth,
-  inMemoryPersistence,
-} from 'firebase/auth';
+import { initializeAuth, getAuth, inMemoryPersistence } from 'firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -15,14 +12,19 @@ const firebaseConfig = {
   appId:             process.env.EXPO_PUBLIC_FIREBASE_APP_ID!,
 };
 
+// Metro(React Native)環境では firebase/auth が RNバンドルに解決され
+// getReactNativePersistence が存在する
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const rnAuth = require('firebase/auth') as any;
+const persistence = typeof rnAuth.getReactNativePersistence === 'function'
+  ? rnAuth.getReactNativePersistence(AsyncStorage)
+  : inMemoryPersistence;
+
 const isNew = getApps().length === 0;
 const app   = isNew ? initializeApp(firebaseConfig) : getApp();
 
-// Firebase v12 removed getReactNativePersistence from the JS SDK.
-// Using inMemoryPersistence for MVP; Google/Apple Sign-In credential caching
-// handles re-auth transparently in practice. Add AsyncStorage persistence post-MVP.
 export const auth = isNew
-  ? initializeAuth(app, { persistence: inMemoryPersistence })
+  ? initializeAuth(app, { persistence })
   : getAuth(app);
 
 export const db = getFirestore(app);

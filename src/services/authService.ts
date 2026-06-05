@@ -59,7 +59,10 @@ export const authService = {
     return { user: result.user, accessToken };
   },
 
-  // Refresh / retrieve current Google access token (auto-refreshes if expired)
+  // Refresh / retrieve current Google access token.
+  // getTokens() throws SIGN_IN_REQUIRED when the native session isn't active
+  // (even though Firebase Auth is restored from AsyncStorage). Fall back to
+  // signInSilently() which re-establishes the native session without UI.
   async getAccessToken(): Promise<string | null> {
     const gs = googleSignin();
     if (!gs) return null;
@@ -67,7 +70,14 @@ export const authService = {
       const tokens = await gs.getTokens();
       return tokens.accessToken ?? null;
     } catch {
-      return null;
+      try {
+        const result = await gs.signInSilently();
+        if (!result?.data?.idToken) return null;
+        const tokens = await gs.getTokens();
+        return tokens.accessToken ?? null;
+      } catch {
+        return null;
+      }
     }
   },
 

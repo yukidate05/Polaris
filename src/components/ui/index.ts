@@ -4,3 +4,6 @@ export { PolarisOrb } from './PolarisOrb';
 export { GlassCard } from './GlassCard';
 export { Button, CircleButton } from './Button';
 export { TopicTag } from './TopicTag';
+export { PaywallModal } from './PaywallModal';
+export { SubscriptionStatusBanner } from './SubscriptionStatusBanner';
+export { PolarisAlert, type AlertButton } from './PolarisAlert';

@@ -1,51 +1,95 @@
-import { View, Text, StyleSheet, Dimensions } from 'react-native';
+import { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { GradientBackground, PolarisOrb, Button } from '@components/ui';
+import { Ionicons } from '@expo/vector-icons';
+import { GradientBackground, PolarisOrb, GlassCard, Button } from '@components/ui';
 import { Colors } from '@constants/colors';
+import { useT } from '@/i18n';
 
-const { height } = Dimensions.get('window');
+const FEATURES = [
+  {
+    icon: 'mic-outline' as const,
+    title: '毎朝の音声ブリーフィング',
+    description: 'カレンダー・メール・ニュースをAIがまとめ、音声でお届け。',
+  },
+  {
+    icon: 'radio-outline' as const,
+    title: 'パーソナライズされたラジオ',
+    description: 'あなたの興味に合わせたニュースや業界動向を、ポッドキャスト感覚で。',
+  },
+  {
+    icon: 'link-outline' as const,
+    title: '多様なサービス連携',
+    description: 'Gmail・カレンダー・Notion・Slackなどを一つに集約。',
+  },
+] as const;
 
 export default function WelcomeScreen() {
+  const [page, setPage] = useState(0);
+  const t = useT();
+
+  const features = [
+    { icon: 'mic-outline' as const,  title: t('feature1_title'), description: t('feature1_desc') },
+    { icon: 'radio-outline' as const, title: t('feature2_title'), description: t('feature2_desc') },
+    { icon: 'link-outline' as const,  title: t('feature3_title'), description: t('feature3_desc') },
+  ];
+
+  if (page === 0) {
+    return (
+      <GradientBackground>
+        <SafeAreaView style={styles.safe}>
+          <View style={styles.container}>
+            <View style={styles.hero}>
+              <PolarisOrb size={96} />
+              <Text style={styles.welcomeTitle}>{t('welcome_title')}</Text>
+              <Text style={styles.welcomeSubtitle}>{t('welcome_subtitle')}</Text>
+              <View style={styles.divider} />
+              <Text style={styles.welcomeDesc}>{t('welcome_desc')}</Text>
+            </View>
+            <View style={styles.bottom}>
+              <Text style={styles.brandName}>Polaris</Text>
+              <Text style={styles.tagline}>Everything. In One Flow.</Text>
+              <View style={styles.actions}>
+                <Button label={t('get_started')} onPress={() => setPage(1)} />
+                <Button
+                  label={t('already_have_account')}
+                  variant="ghost"
+                  onPress={() => router.push('/(auth)/login')}
+                  style={styles.loginLink}
+                />
+              </View>
+            </View>
+          </View>
+        </SafeAreaView>
+      </GradientBackground>
+    );
+  }
+
   return (
     <GradientBackground>
       <SafeAreaView style={styles.safe}>
-        <View style={styles.container}>
-          {/* Top badge */}
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>01</Text>
+        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+          <Text style={styles.featuresTitle}>{t('features_title')}</Text>
+          <Text style={styles.featuresSubtitle}>{t('features_subtitle')}</Text>
+          <View style={styles.featuresList}>
+            {features.map((f) => (
+              <GlassCard key={f.title} style={styles.featureCard}>
+                <View style={styles.featureIcon}>
+                  <Ionicons name={f.icon} size={22} color={Colors.brand.primary} />
+                </View>
+                <View style={styles.featureText}>
+                  <Text style={styles.featureTitle}>{f.title}</Text>
+                  <Text style={styles.featureDesc}>{f.description}</Text>
+                </View>
+              </GlassCard>
+            ))}
           </View>
-
-          {/* Orb + hero text */}
-          <View style={styles.hero}>
-            <PolarisOrb size={96} />
-            <Text style={styles.title}>{'声で、\n今日を整える。'}</Text>
-            <Text style={styles.subtitle}>あなたの北極星</Text>
-            <View style={styles.divider} />
-            <Text style={styles.description}>
-              {'AIがあなたに合わせて、\nその日の予定やニュースをまとめて\nいつでも優しくお届けします。'}
-            </Text>
+          <View style={styles.actions}>
+            <Button label={t('next')} onPress={() => router.push('/(auth)/login')} />
+            <Button label={t('back')} variant="ghost" onPress={() => setPage(0)} />
           </View>
-
-          {/* Bottom branding + CTA */}
-          <View style={styles.bottom}>
-            <Text style={styles.brandName}>Polaris</Text>
-            <Text style={styles.tagline}>Everything. In One Flow.</Text>
-
-            <View style={styles.actions}>
-              <Button
-                label="はじめる"
-                onPress={() => router.push('/(onboarding)/features')}
-              />
-              <Button
-                label="すでにアカウントをお持ちの方"
-                variant="ghost"
-                onPress={() => router.push('/(auth)/login')}
-                style={styles.loginLink}
-              />
-            </View>
-          </View>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     </GradientBackground>
   );
@@ -53,33 +97,20 @@ export default function WelcomeScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
+
+  // Page 1
   container: {
     flex: 1,
     paddingHorizontal: 28,
     paddingVertical: 16,
     justifyContent: 'space-between',
   },
-  badge: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.75)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 0.5,
-    borderColor: 'rgba(0,0,0,0.08)',
-  },
-  badgeText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.text.primary,
-  },
   hero: {
     alignItems: 'flex-start',
     gap: 12,
-    paddingTop: 8,
+    marginTop: 100,
   },
-  title: {
+  welcomeTitle: {
     fontSize: 38,
     fontWeight: '800',
     color: '#ffffff',
@@ -87,7 +118,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
     marginTop: 8,
   },
-  subtitle: {
+  welcomeSubtitle: {
     fontSize: 16,
     fontWeight: '500',
     color: 'rgba(160,255,220,0.95)',
@@ -99,7 +130,7 @@ const styles = StyleSheet.create({
     borderRadius: 1,
     marginVertical: 4,
   },
-  description: {
+  welcomeDesc: {
     fontSize: 15,
     color: 'rgba(255,255,255,0.72)',
     lineHeight: 24,
@@ -118,11 +149,54 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.50)',
     marginBottom: 20,
   },
-  actions: {
-    gap: 12,
+
+  // Page 2
+  scroll: {
+    paddingHorizontal: 28,
+    paddingVertical: 16,
+    gap: 16,
   },
-  loginLink: {
-    alignSelf: 'center',
-    marginTop: 4,
+  featuresTitle: {
+    fontSize: 30,
+    fontWeight: '800',
+    color: '#ffffff',
+    lineHeight: 40,
+    letterSpacing: -0.3,
   },
+  featuresSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.72)',
+    lineHeight: 22,
+  },
+  featuresList: { gap: 12 },
+  featureCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 14,
+    padding: 16,
+  },
+  featureIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(20,184,166,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  featureText: { flex: 1 },
+  featureTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#ffffff',
+    marginBottom: 4,
+  },
+  featureDesc: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.68)',
+    lineHeight: 20,
+  },
+
+  // Shared
+  actions:   { gap: 12 },
+  loginLink: { alignSelf: 'center', marginTop: 4 },
 });

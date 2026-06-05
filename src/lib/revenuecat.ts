@@ -52,3 +52,15 @@ export async function restorePurchases() {
   if (!pkg) throw new Error('RevenueCat not available in Expo Go');
   return pkg.default.restorePurchases();
 }
+
+export async function checkIsPro(): Promise<boolean> {
+  const pkg = getPurchases();
+  if (!pkg) return false; // Expo Go では無料扱い
+  try {
+    const info = await pkg.default.getCustomerInfo();
+    const active = info.entitlements.active;
+    return !!active['pro'] || !!active['plus'];
+  } catch {
+    return false;
+  }
+}

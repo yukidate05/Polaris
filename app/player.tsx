@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, Animated,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, Animated, Dimensions,
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -9,9 +9,15 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { AuroraBackground } from '@components/ui';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer, type AudioStatus } from 'expo-audio';
 import { useBriefingStore } from '@stores/briefingStore';
+import { useAuthStore } from '@stores/authStore';
 import { speechService, SPEECH_RATES, type SpeechRate } from '@services/speechService';
+import { sessionService } from '@services/sessionService';
 import { Colors } from '@constants/colors';
 import type { BriefingChapter } from '@services/briefingService';
+
+const CURR_LINE_H  = 34; // lineHeight for current turn text
+const CURR_LINES   = 5;  // max lines shown
+const CURR_SLOT_MAX = CURR_LINE_H * CURR_LINES + 24; // +24 for dot + gap
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -27,6 +33,7 @@ function chapterAtTime(chapters: BriefingChapter[], sec: number): BriefingChapte
 
 export default function PlayerScreen() {
   const { script } = useBriefingStore();
+  const { user }   = useAuthStore();
 
   const [isPlaying,  setIsPlaying]  = useState(false);
   const [currentSec, setCurrentSec] = useState(0);
@@ -56,9 +63,10 @@ export default function PlayerScreen() {
 
   const activeTurnIdx = useMemo(() => {
     if (!dialogueTurns.length) return -1;
+    const ahead = currentSec + 0.5; // 音声が字幕より先行する分を補正
     let idx = 0;
     for (let i = 0; i < dialogueTurns.length; i++) {
-      if (currentSec >= dialogueTurns[i].startSec) idx = i;
+      if (ahead >= dialogueTurns[i].startSec) idx = i;
       else break;
     }
     return idx;
@@ -87,24 +95,28 @@ export default function PlayerScreen() {
 
   useEffect(() => {
     if (!script) return;
-    if (isAudio) setupAudioPlayer(script.audioUri!);
-    else startSpeech();
-    return () => cleanup();
-  }, []);
+    let cancelled = false;
 
-  async function setupAudioPlayer(uri: string) {
-    await setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: true });
-    const p = createAudioPlayer({ uri }, { updateInterval: 250 });
-    playerRef.current = p;
-    p.addListener('playbackStatusUpdate', (status: AudioStatus) => {
-      setCurrentSec(status.currentTime ?? 0);
-      if (status.duration) setTotalSec(status.duration);
-      setIsPlaying(status.playing);
-      if (status.didJustFinish) { setIsPlaying(false); setCurrentSec(0); }
-    });
-    p.play();
-    setIsPlaying(true);
-  }
+    if (isAudio) {
+      setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: true }).then(() => {
+        if (cancelled) return;
+        const p = createAudioPlayer({ uri: script.audioUri! }, { updateInterval: 100 });
+        playerRef.current = p;
+        p.addListener('playbackStatusUpdate', (status: AudioStatus) => {
+          setCurrentSec(status.currentTime ?? 0);
+          if (status.duration) setTotalSec(status.duration);
+          setIsPlaying(status.playing);
+          if (status.didJustFinish) { setIsPlaying(false); setCurrentSec(0); }
+        });
+        p.play();
+        setIsPlaying(true);
+      });
+    } else {
+      startSpeech();
+    }
+
+    return () => { cancelled = true; cleanup(); };
+  }, []);
 
   async function startSpeech() {
     if (!script) return;
@@ -123,6 +135,18 @@ export default function PlayerScreen() {
     if (playerRef.current) { playerRef.current.pause(); playerRef.current.remove(); playerRef.current = null; }
     clearInterval(timerRef.current!);
     speechService.stop();
+
+    // セッション進捗をFirestoreに保存（クロスデバイス引き継ぎ用）
+    if (user?.uid && script && totalSec > 0) {
+      const chapterIdx   = script.chapters.indexOf(activeChapter ?? script.chapters[0]);
+      const topicSummary = script.chapters.map((c) => c.title).join('、');
+      sessionService.saveProgress(user.uid, {
+        chapterTitle:  activeChapter?.title ?? script.chapters[0]?.title ?? '',
+        chapterIndex:  Math.max(0, chapterIdx),
+        completionRate: Math.min(1, currentSec / totalSec),
+        topicSummary,
+      });
+    }
   }
 
   const handlePlayPause = useCallback(async () => {
@@ -196,7 +220,9 @@ export default function PlayerScreen() {
             {currTurn ? (
               <>
                 <View style={styles.activeDot} />
-                <Text style={styles.currText}>{currTurn.text}</Text>
+                <Text style={styles.currText} numberOfLines={CURR_LINES}>
+                  {currTurn.text}
+                </Text>
               </>
             ) : null}
           </Animated.View>
@@ -315,13 +341,15 @@ const styles = StyleSheet.create({
   prevText: { fontSize: 17, color: '#fff', lineHeight: 26 },
 
   currSlot: {
-    flex: 1.2,
+    flex: 2,
+    maxHeight: CURR_SLOT_MAX,
     justifyContent: 'center',
     paddingHorizontal: 28,
     gap: 12,
+    overflow: 'hidden',
   },
   activeDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.brand.primary },
-  currText:   { fontSize: 22, fontWeight: '700', color: '#fff', lineHeight: 34 },
+  currText:   { fontSize: 22, fontWeight: '700', color: '#fff', lineHeight: CURR_LINE_H },
 
   nextSlot: {
     flex: 1,

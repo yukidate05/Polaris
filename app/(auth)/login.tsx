@@ -1,5 +1,9 @@
 import { useState } from 'react';
-import { View, Text, StyleSheet, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, Alert, Platform, Linking } from 'react-native';
+import { useT } from '@/i18n';
+
+const PRIVACY_POLICY_URL = 'https://yukidate05.github.io/Polaris/privacy.html';
+const TERMS_URL = 'https://yukidate05.github.io/Polaris/terms.html';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -12,6 +16,7 @@ import { Colors } from '@constants/colors';
 export default function LoginScreen() {
   const [loading, setLoading] = useState<'google' | 'apple' | null>(null);
   const { setLoading: setStoreLoading, setGoogleAccessToken, setProfile } = useAuthStore();
+  const t = useT();
 
   async function handleGoogleSignIn() {
     setLoading('google');
@@ -58,20 +63,29 @@ export default function LoginScreen() {
           <View style={styles.hero}>
             <PolarisOrb size={80} />
             <Text style={styles.title}>Polaris</Text>
-            <Text style={styles.subtitle}>今日を、最高の一日に。</Text>
+            <Text style={styles.subtitle}>{t('login_subtitle')}</Text>
           </View>
 
           {/* Login card */}
-          <GlassCard style={styles.card}>
-            <Text style={styles.cardTitle}>ログイン / アカウント作成</Text>
+          <View style={styles.card}>
+          <GlassCard padding={0} contentStyle={styles.cardContent}>
+            <Text style={styles.cardTitle}>{t('login_title')}</Text>
             <Text style={styles.cardSubtitle}>
-              続行することで、利用規約およびプライバシーポリシーに同意したものとみなされます。
+              {t('login_agreement')}
+              <Text style={styles.link} onPress={() => Linking.openURL(TERMS_URL)}>
+                {t('login_terms')}
+              </Text>
+              {t('login_and')}
+              <Text style={styles.link} onPress={() => Linking.openURL(PRIVACY_POLICY_URL)}>
+                {t('login_privacy')}
+              </Text>
+              {t('login_agreement2')}
             </Text>
 
             <View style={styles.buttons}>
               <Button
                 onPress={handleGoogleSignIn}
-                label="Googleでログイン"
+                label={t('sign_in_google')}
                 variant="secondary"
                 loading={loading === 'google'}
                 disabled={loading !== null}
@@ -88,9 +102,10 @@ export default function LoginScreen() {
               )}
             </View>
           </GlassCard>
+          </View>
 
           <Button
-            label="戻る"
+            label={t('back')}
             variant="ghost"
             onPress={() => router.back()}
           />
@@ -125,7 +140,9 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.72)',
   },
   card: {
-    width: '100%',
+    alignSelf: 'stretch',
+  },
+  cardContent: {
     padding: 24,
     gap: 16,
   },
@@ -140,6 +157,10 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.50)',
     textAlign: 'center',
     lineHeight: 18,
+  },
+  link: {
+    color: 'rgba(255,255,255,0.75)',
+    textDecorationLine: 'underline',
   },
   buttons: { gap: 12 },
   appleButton: {

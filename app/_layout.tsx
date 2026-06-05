@@ -20,7 +20,7 @@ const queryClient = new QueryClient({
 });
 
 export default function RootLayout() {
-  const { setUser, setProfile, setGoogleAccessToken, setInitialized } = useAuthStore();
+  const { setUser, setProfile, setGoogleAccessToken, setGoogleTokenResolved, setInitialized } = useAuthStore();
 
   useEffect(() => {
     // Initialize analytics
@@ -36,11 +36,16 @@ export default function RootLayout() {
         initPostHog(user.uid);
         // Ensure Firestore profile exists and load it
         userService.upsertProfile(user).then(setProfile).catch(() => null);
-        // Restore Google access token for Gmail/Calendar API calls
-        authService.getAccessToken().then((t) => { if (t) setGoogleAccessToken(t); }).catch(() => null);
+        // Restore Google access token for Gmail/Calendar API calls.
+        // Always resolve the flag so home screen knows it's safe to generate.
+        authService.getAccessToken()
+          .then((t) => { if (t) setGoogleAccessToken(t); })
+          .catch(() => null)
+          .finally(() => setGoogleTokenResolved(true));
       } else {
         setProfile(null);
         setGoogleAccessToken(null);
+        setGoogleTokenResolved(true);
       }
     });
     return unsubscribe;

@@ -40,3 +40,24 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Firebase iOS config (contains API keys)
+GoogleService-Info.plist
+
+# Firebase Functions compiled output
+functions/lib/
+
+# Large audio assets
+assets/bgm/
+assets/voices/
+
+# Logs & test files
+metro-tunnel.log
+test-gemini.mjs
+
+# Claude Code internal
+.claude/
+
+# Reference/temp images
+img/Huxe/
+img/icon/ChatGPT*

@@ -87,12 +87,12 @@ export default function DeepcastScreen() {
                 <BlurView intensity={65} tint="light" style={StyleSheet.absoluteFill} />
                 <View style={styles.inputTint} pointerEvents="none" />
                 <View style={styles.inputWrap}>
-                  <Ionicons name="search-outline" size={18} color={Colors.text.tertiary} />
+                  <Ionicons name="search-outline" size={18} color={Colors.text.darkTertiary} />
                   <TextInput
                     ref={inputRef}
                     style={styles.input}
                     placeholder="何について知りたいですか？"
-                    placeholderTextColor={Colors.text.tertiary}
+                    placeholderTextColor={Colors.text.darkTertiary}
                     value={topic}
                     onChangeText={setTopic}
                     onSubmitEditing={() => handleGenerate()}
@@ -102,7 +102,7 @@ export default function DeepcastScreen() {
                   />
                   {topic.length > 0 && (
                     <TouchableOpacity onPress={() => setTopic('')}>
-                      <Ionicons name="close-circle" size={18} color={Colors.text.tertiary} />
+                      <Ionicons name="close-circle" size={18} color={Colors.text.darkTertiary} />
                     </TouchableOpacity>
                   )}
                 </View>
@@ -214,7 +214,7 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 15,
-    color: Colors.text.primary,
+    color: Colors.text.dark,
     fontWeight: '400',
   },
 

@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 const API_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
 // Default Japanese-capable voice (Sarah)

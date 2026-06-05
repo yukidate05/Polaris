@@ -95,11 +95,11 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 28,
     fontWeight: '800',
-    color: Colors.text.primary,
+    color: '#FFFFFF',
   },
   headerSubtitle: {
     fontSize: 13,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.60)',
     paddingHorizontal: 20,
     marginBottom: 8,
   },
