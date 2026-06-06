@@ -15,11 +15,20 @@ export interface FollowupMemory {
   since:   string; // YYYY-MM-DD
 }
 
+// 外部ツール（Slack/Chatwork/Notion）から蓄積したプロジェクト・話題の現状メモ
+export interface TopicStatus {
+  topic:       string; // 話題・プロジェクト名
+  status:      string; // 現在の状態（「進行中」「遅延あり」「解決済み」等）
+  source:      string; // "Chatwork" | "Slack" | "Notion"
+  lastUpdated: string; // YYYY-MM-DD
+}
+
 export interface UserContext {
   inferredRole:     string;
   frequentContacts: ContactMemory[];
   recentTopics:     string[];
   pendingFollowups: FollowupMemory[];
+  topicStatuses:    TopicStatus[]; // 外部ツールから蓄積した現状スナップショット
 }
 
 // Circuit breaker: skip memory extraction for the session if quota is exceeded
@@ -54,6 +63,7 @@ export const memoryService = {
         frequentContacts: d.frequentContacts ?? [],
         recentTopics:     d.recentTopics     ?? [],
         pendingFollowups: d.pendingFollowups ?? [],
+        topicStatuses:    d.topicStatuses    ?? [],
       };
     } catch {
       return null;
@@ -67,8 +77,17 @@ export const memoryService = {
     });
   },
 
-  // メール・カレンダーから記憶を抽出してFirestoreに保存（非同期・ノンブロッキング）
-  async extractAndSave(uid: string, googleData: GoogleData, existing: UserContext | null): Promise<void> {
+  // メール・カレンダー・外部ツールから記憶を抽出してFirestoreに保存（非同期・ノンブロッキング）
+  async extractAndSave(
+    uid: string,
+    googleData: GoogleData,
+    existing: UserContext | null,
+    externalData?: {
+      slackMessages?:    { workspace: string; channelName: string; messages: string[] }[] | null;
+      notionPages?:      { title: string; lastEditedBy?: string }[] | null;
+      chatworkMessages?: { roomName: string; accountName: string; body: string; isMention: boolean }[] | null;
+    } | null,
+  ): Promise<void> {
     const today = new Date().toISOString().slice(0, 10);
 
     const emailLines = googleData.topEmails.slice(0, 8)
@@ -82,11 +101,34 @@ export const memoryService = {
           frequentContacts: existing.frequentContacts.slice(0, 8),
           recentTopics:     existing.recentTopics.slice(0, 10),
           pendingFollowups: existing.pendingFollowups.slice(0, 5),
+          topicStatuses:    existing.topicStatuses.slice(0, 10),
         }, null, 2)
       : '{}';
 
+    // 外部ツールデータを文字列化
+    const slackLines = externalData?.slackMessages?.length
+      ? externalData.slackMessages.map(ch =>
+          `[${ch.workspace}/${ch.channelName}] ${ch.messages.slice(0, 3).join(' / ')}`
+        ).join('\n')
+      : null;
+    const notionLines = externalData?.notionPages?.length
+      ? externalData.notionPages.slice(0, 5).map(p =>
+          `・${p.title}${p.lastEditedBy ? `（更新者: ${p.lastEditedBy}）` : ''}`
+        ).join('\n')
+      : null;
+    const chatworkLines = externalData?.chatworkMessages?.length
+      ? externalData.chatworkMessages.slice(0, 8).map(m =>
+          `[${m.roomName}]${m.isMention ? '【メンション】' : ''} ${m.accountName}: ${m.body.slice(0, 100)}`
+        ).join('\n')
+      : null;
+
+    const externalBlock = (slackLines || notionLines || chatworkLines)
+      ? `\n【外部ツールの今日のやりとり（現状把握に使用）】
+${slackLines    ? `Slack:\n${slackLines}\n`    : ''}${notionLines   ? `Notion:\n${notionLines}\n`   : ''}${chatworkLines ? `Chatwork:\n${chatworkLines}` : ''}`
+      : '';
+
     const prompt = `今日は${today}です。
-以下のメール・カレンダーと既存の記憶をもとに、ユーザーについての記憶をJSONで更新してください。
+以下のデータと既存の記憶をもとに、ユーザーについての記憶をJSONで更新してください。
 
 【既存の記憶】
 ${existingStr}
@@ -96,19 +138,24 @@ ${emailLines}
 
 【今日・明日の予定】
 ${eventLines}
+${externalBlock}
 
 ルール:
 - inferredRole: 会議・メールのパターンから職種・役割を推定（既存があれば大きく変えない）
-- frequentContacts: メール送信者を追加・更新（最大10人、lastSeen=${today}で更新）
-- recentTopics: メール件名・予定タイトルから主要トピック（最大10個、新しいものを優先）
+- frequentContacts: メール・外部ツールの送信者を追加・更新（最大10人、lastSeen=${today}で更新）
+- recentTopics: メール件名・予定・Slack/Chatworkのキーワードから主要トピック（最大10個）
 - pendingFollowups: 返信待ち・続きが必要そうなもの（最大5個、2週間以上前は除去）
+- topicStatuses: Slack・Chatwork・Notionから読み取れる「プロジェクト・話題の現在の状態」を記録する（最大10個）
+  例: {"topic": "プロジェクトX", "status": "遅延が発生、Aさんが対応中", "source": "Chatwork", "lastUpdated": "${today}"}
+  既存のtopicStatusesは今日のデータで状態が変わっていれば上書き、変化がなければそのまま保持
 
 JSONのみ返してください:
 {
-  "inferredRole": "推定の職種・役割（例：プロダクトマネージャー、エンジニア）",
+  "inferredRole": "推定の職種・役割",
   "frequentContacts": [{"name": "名前", "recentTopics": ["関連トピック"], "lastSeen": "YYYY-MM-DD"}],
   "recentTopics": ["トピック1", "トピック2"],
-  "pendingFollowups": [{"contact": "名前", "topic": "内容", "since": "YYYY-MM-DD"}]
+  "pendingFollowups": [{"contact": "名前", "topic": "内容", "since": "YYYY-MM-DD"}],
+  "topicStatuses": [{"topic": "話題・プロジェクト名", "status": "現在の状態", "source": "Chatwork|Slack|Notion", "lastUpdated": "YYYY-MM-DD"}]
 }`;
 
     try {

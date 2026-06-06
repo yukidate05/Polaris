@@ -12,6 +12,7 @@ export interface ChatworkMessage {
   accountName: string;
   body:        string;
   sendTime:    number;
+  isMention:   boolean;
 }
 
 export const chatworkService = {
@@ -47,8 +48,7 @@ export const chatworkService = {
     });
   },
 
-  async getRecentMessages(): Promise<ChatworkMessage[]> {
-    const { messages } = await callFunction<{ messages: ChatworkMessage[] }>('chatworkMessages', {});
-    return messages;
+  async getRecentMessages(): Promise<{ messages: ChatworkMessage[]; totalUnread: number }> {
+    return callFunction<{ messages: ChatworkMessage[]; totalUnread: number }>('chatworkMessages', {});
   },
 };

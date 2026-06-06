@@ -10,10 +10,11 @@ const REDIRECT_URI     = 'https://yukidate05.github.io/Polaris/notion-callback';
 const NOTION_CLIENT_ID = process.env.EXPO_PUBLIC_NOTION_CLIENT_ID ?? '';
 
 export interface NotionPage {
-  id:    string;
-  title: string;
-  url:   string;
-  lastEdited: string;
+  id:           string;
+  title:        string;
+  url:          string;
+  lastEdited:   string;
+  lastEditedBy?: string;
 }
 
 export const notionService = {
@@ -51,12 +52,14 @@ export const notionService = {
       id: string;
       url: string;
       last_edited_time: string;
+      last_edited_by?: { id?: string; name?: string };
       properties?: { title?: { title?: { plain_text: string }[] }[] };
     }>).map((p) => ({
-      id:         p.id,
-      url:        p.url,
-      lastEdited: p.last_edited_time,
-      title:      (p.properties?.title as { title?: { plain_text: string }[] } | undefined)?.title?.[0]?.plain_text ?? '無題',
+      id:           p.id,
+      url:          p.url,
+      lastEdited:   p.last_edited_time,
+      lastEditedBy: p.last_edited_by?.name,
+      title:        (p.properties?.title as { title?: { plain_text: string }[] } | undefined)?.title?.[0]?.plain_text ?? '無題',
     }));
   },
 };

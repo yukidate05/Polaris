@@ -1,7 +1,9 @@
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
 import { onRequest } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
+import { randomUUID } from 'crypto';
 
 initializeApp();
 export const db = getFirestore();
@@ -212,7 +214,28 @@ export const geminiTts = onRequest(
     const header = buildWavHeader(pcm.length);
     const wav    = Buffer.concat([header, pcm]);
 
-    res.json({ audioBase64: wav.toString('base64'), mimeType: 'audio/wav' });
+    // Upload to Firebase Storage and return a download URL to avoid Cloud Run 32 MB response limit
+    const BUCKET_NAME = 'polaris-app-yukid.firebasestorage.app';
+    const bucket   = getStorage().bucket(BUCKET_NAME);
+    const uuid     = randomUUID();
+    // Fixed filename per user — overwrites previous file, keeping only 1 file per user in Storage
+    const fileName = `audio/${uid}/brief.wav`;
+    const file     = bucket.file(fileName);
+    try {
+      await file.save(wav, {
+        resumable: false,
+        metadata: {
+          contentType: 'audio/wav',
+          metadata: { firebaseStorageDownloadTokens: uuid },
+        },
+      });
+    } catch (storageErr) {
+      console.error('[geminiTts] Storage upload failed:', storageErr);
+      res.status(500).send(`Storage upload failed: ${storageErr instanceof Error ? storageErr.message : String(storageErr)}`);
+      return;
+    }
+    const audioUrl = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(BUCKET_NAME)}/o/${encodeURIComponent(fileName)}?alt=media&token=${uuid}`;
+    res.json({ audioUrl, mimeType: 'audio/wav' });
   }
 );
 
@@ -413,39 +436,100 @@ export const slackMessages = onRequest(
     const workspaces = (snap.data()?.slackWorkspaces ?? []) as { teamId: string; teamName: string; accessToken: string }[];
     if (!workspaces.length) { res.status(404).send('Slack not connected'); return; }
 
-    const oldest = Math.floor((Date.now() - 24 * 60 * 60 * 1000) / 1000).toString();
+    const oldest = Math.floor((Date.now() - 7 * 24 * 60 * 60 * 1000) / 1000).toString(); // 7日間
 
     async function fetchWorkspaceChannels(ws: { teamName: string; accessToken: string }) {
-      const channelsRes  = await fetch(
-        'https://slack.com/api/conversations.list?types=public_channel&exclude_archived=true&limit=10',
-        { headers: { 'Authorization': `Bearer ${ws.accessToken}` } }
-      );
-      const channelsData = await channelsRes.json() as {
-        ok: boolean;
-        channels?: { id: string; name: string; is_member: boolean }[];
-      };
-      if (!channelsData.ok || !channelsData.channels?.length) return [];
+      type ConvChannel = { id: string; name: string; is_member?: boolean; is_im?: boolean; user?: string };
+      type ConvListRes = { ok: boolean; error?: string; channels?: ConvChannel[] };
 
-      const joined = channelsData.channels.filter(c => c.is_member).slice(0, 3);
-      const results = await Promise.all(
-        joined.map(async (ch) => {
-          const histRes  = await fetch(
-            `https://slack.com/api/conversations.history?channel=${ch.id}&oldest=${oldest}&limit=15`,
-            { headers: { 'Authorization': `Bearer ${ws.accessToken}` } }
-          );
-          const histData = await histRes.json() as { ok: boolean; messages?: { text: string }[] };
-          const messages = (histData.messages ?? [])
-            .map(m => m.text)
-            .filter(t => t && !t.startsWith('<') && t.length > 5)
-            .slice(0, 8);
-          return { workspace: ws.teamName, channelName: ch.name, messages };
-        })
-      );
-      return results.filter(r => r.messages.length > 0);
+      // private_channel,mpim も試みる。スコープ不足なら public_channel,im にフォールバック
+      let channelsData: ConvListRes = { ok: false };
+      for (const types of ['public_channel,private_channel,mpim,im', 'public_channel,im']) {
+        const r = await fetch(
+          `https://slack.com/api/conversations.list?types=${types}&exclude_archived=true&limit=200`,
+          { headers: { 'Authorization': `Bearer ${ws.accessToken}` } }
+        );
+        channelsData = await r.json() as ConvListRes;
+        if (channelsData.ok) break;
+        console.warn('[slack] conversations.list failed:', channelsData.error, '→ retrying with', types);
+      }
+
+      if (!channelsData.ok || !channelsData.channels?.length) {
+        console.error('[slack] conversations.list ultimately failed:', channelsData.error);
+        return { channels: [], totalUnread: 0 };
+      }
+
+      // 参加済みチャンネル（上位5件）+ 開いているDM（上位5件）
+      // private_channel/mpim はリスト自体がメンバーのものだけなので is_member チェック不要
+      const allConvs = channelsData.channels as ConvChannel[];
+      const joinedChannels = allConvs.filter(c => !c.is_im && c.is_member !== false).slice(0, 5);
+      const openDMs        = allConvs.filter(c => c.is_im).slice(0, 5);
+      const targets        = [...joinedChannels, ...openDMs];
+
+      // ユーザーID→名前のキャッシュ
+      const userNameCache: Record<string, string> = {};
+      async function resolveUser(userId: string): Promise<string> {
+        if (userNameCache[userId]) return userNameCache[userId];
+        try {
+          const r = await fetch(`https://slack.com/api/users.info?user=${userId}`, {
+            headers: { 'Authorization': `Bearer ${ws.accessToken}` },
+          });
+          const d = await r.json() as { ok: boolean; user?: { real_name?: string; name?: string } };
+          // ok:false = missing scope など。生IDは渡さず "メンバー" に置換
+          const name = d.ok ? (d.user?.real_name || d.user?.name || 'メンバー') : 'メンバー';
+          userNameCache[userId] = name;
+          return name;
+        } catch {
+          return 'メンバー';
+        }
+      }
+
+      let totalUnread = 0;
+      const results: { workspace: string; channelName: string; messages: string[] }[] = [];
+
+      for (const conv of targets) {
+        const histRes  = await fetch(
+          `https://slack.com/api/conversations.history?channel=${conv.id}&oldest=${oldest}&limit=30`,
+          { headers: { 'Authorization': `Bearer ${ws.accessToken}` } }
+        );
+        const histData = await histRes.json() as { ok: boolean; messages?: { text: string; subtype?: string; user?: string; username?: string }[] };
+        if (!histData.ok) continue;
+
+        const rawMessages = (histData.messages ?? [])
+          .filter(m => {
+            if (!m.text || m.text.length <= 5) return false;
+            if (conv.is_im) return !m.subtype || m.subtype === 'me_message' || m.subtype === 'bot_message';
+            return !m.subtype && !m.text.startsWith('<');
+          })
+          .slice(0, 30)
+          .reverse(); // 古い順（会話の流れ）
+
+        // ユーザーID解決（並行）
+        const userIds = [...new Set(rawMessages.map(m => m.user).filter(Boolean) as string[])];
+        await Promise.all(userIds.map(id => resolveUser(id)));
+
+        const messages = rawMessages.map(m => {
+          const sender = m.username || (m.user ? userNameCache[m.user] || m.user : null);
+          const text   = m.text.slice(0, 800);
+          return sender ? `${sender}: ${text}` : text;
+        });
+
+        totalUnread += messages.length;
+        if (messages.length > 0) {
+          const channelName = conv.is_im
+            ? `DM${conv.user ? `(${conv.user})` : ''}`
+            : (conv.name ?? 'unknown');
+          results.push({ workspace: ws.teamName, channelName, messages });
+        }
+      }
+
+      return { channels: results, totalUnread };
     }
 
-    const allResults = (await Promise.all(workspaces.map(fetchWorkspaceChannels))).flat();
-    res.json({ channels: allResults });
+    const allResults  = await Promise.all(workspaces.map(fetchWorkspaceChannels));
+    const allChannels = allResults.flatMap(r => r.channels);
+    const totalUnread = allResults.reduce((sum, r) => sum + r.totalUnread, 0);
+    res.json({ channels: allChannels, totalUnread });
   }
 );
 
@@ -523,6 +607,7 @@ export const teamsMessages = onRequest(
     const refreshToken = data.teamsRefreshToken as string;
 
     // 5分前倒しでトークンリフレッシュ
+    console.log('[teamsMessages] expiresAt:', expiresAt, 'now:', Date.now(), 'needsRefresh:', Date.now() >= expiresAt - 5 * 60 * 1000);
     if (Date.now() >= expiresAt - 5 * 60 * 1000) {
       const refreshRes = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
         method: 'POST',
@@ -537,7 +622,8 @@ export const teamsMessages = onRequest(
       });
 
       if (!refreshRes.ok) {
-        // リフレッシュ失敗 → 再認証が必要
+        const refreshErr = await refreshRes.text();
+        console.error('[teamsMessages] token refresh failed:', refreshRes.status, refreshErr);
         await db.collection('users').doc(uid).update({
           teamsAccessToken:  FieldValue.delete(),
           teamsRefreshToken: FieldValue.delete(),
@@ -553,6 +639,7 @@ export const teamsMessages = onRequest(
       };
 
       accessToken = newTokens.access_token;
+      console.log('[teamsMessages] token refreshed, new expires_in:', newTokens.expires_in);
       await db.collection('users').doc(uid).update({
         teamsAccessToken:    newTokens.access_token,
         teamsRefreshToken:   newTokens.refresh_token,
@@ -567,7 +654,23 @@ export const teamsMessages = onRequest(
     );
 
     if (!chatsRes.ok) {
-      res.status(chatsRes.status).send(await chatsRes.text());
+      const chatsErr = await chatsRes.text();
+      console.error('[teamsMessages] chats API error:', chatsRes.status, chatsErr);
+      // 401 のみトークン無効 → 削除して再接続を促す
+      // 403 は権限不足（個人アカウント等）→ トークンは残して空配列を返す
+      if (chatsRes.status === 401) {
+        await db.collection('users').doc(uid).update({
+          teamsAccessToken:  FieldValue.delete(),
+          teamsRefreshToken: FieldValue.delete(),
+        });
+        res.status(401).send('teams_token_invalid');
+        return;
+      }
+      if (chatsRes.status === 403) {
+        res.json({ chats: [] });
+        return;
+      }
+      res.status(chatsRes.status).send(chatsErr);
       return;
     }
 
@@ -695,6 +798,8 @@ export const chatworkMessages = onRequest(
       });
 
       if (!refreshRes.ok) {
+        const refreshErr = await refreshRes.text();
+        console.error('[chatworkMessages] token refresh failed:', refreshRes.status, refreshErr);
         await db.collection('users').doc(uid).update({
           chatworkAccessToken:  FieldValue.delete(),
           chatworkRefreshToken: FieldValue.delete(),
@@ -723,7 +828,9 @@ export const chatworkMessages = onRequest(
     });
 
     if (!roomsRes.ok) {
-      res.status(roomsRes.status).send(await roomsRes.text());
+      const errBody = await roomsRes.text();
+      console.error('[chatworkMessages] rooms API error:', roomsRes.status, errBody);
+      res.status(roomsRes.status).send(errBody);
       return;
     }
 
@@ -731,23 +838,29 @@ export const chatworkMessages = onRequest(
       room_id:          number;
       name:             string;
       last_update_time: number;
+      unread_num:       number;
     }>;
 
-    // 最近更新された上位3ルームのメッセージを取得
-    const topRooms = rooms
-      .sort((a, b) => b.last_update_time - a.last_update_time)
-      .slice(0, 3);
+    // 全ルームの未読数合計（/rooms は既読にしない）
+    const totalUnread = rooms.reduce((sum, r) => sum + (r.unread_num ?? 0), 0);
 
-    const since = Math.floor((Date.now() - 24 * 60 * 60 * 1000) / 1000);
+    // 未読ルームを優先（上位5件）、なければ最近更新された上位3ルーム
+    const unreadRooms   = rooms.filter(r => r.unread_num > 0).slice(0, 5);
+    const fallbackRooms = rooms.sort((a, b) => b.last_update_time - a.last_update_time).slice(0, 3);
+    const topRooms      = unreadRooms.length > 0 ? unreadRooms : fallbackRooms;
 
-    const allMessages: Array<{ roomName: string; accountName: string; body: string; sendTime: number }> = [];
+    // 未読ルームは7日分、フォールバックルームは48時間分
+    const since7d  = Math.floor((Date.now() - 7  * 24 * 60 * 60 * 1000) / 1000);
+    const since48h = Math.floor((Date.now() - 48 * 60 * 60 * 1000) / 1000);
+
+    const allMessages: Array<{ roomName: string; accountName: string; body: string; sendTime: number; isMention: boolean }> = [];
 
     for (const room of topRooms) {
       const msgsRes = await fetch(
-        `https://api.chatwork.com/v2/rooms/${room.room_id}/messages?force=0`,
+        `https://api.chatwork.com/v2/rooms/${room.room_id}/messages?force=1`,
         { headers: { 'Authorization': `Bearer ${accessToken}` } }
       );
-      if (!msgsRes.ok) continue;
+      if (!msgsRes.ok || msgsRes.status === 204) continue;
 
       const msgs = await msgsRes.json() as Array<{
         account:   { name: string };
@@ -755,23 +868,38 @@ export const chatworkMessages = onRequest(
         send_time: number;
       }>;
 
+      const since    = room.unread_num > 0 ? since7d : since48h;
+      const maxMsgs  = room.unread_num > 0 ? 30 : 10; // 未読ルームは多めに取得
+
       const recent = msgs
-        .filter(m => m.send_time >= since && m.body && !m.body.startsWith('[To:'))
-        .slice(-5)
-        .map(m => ({
-          roomName:    room.name,
-          accountName: m.account.name,
-          body:        m.body.replace(/\[.*?\]/g, '').trim().slice(0, 200),
-          sendTime:    m.send_time,
-        }))
-        .filter(m => m.body.length > 3);
+        .filter(m => m.send_time >= since && m.body && m.body.trim().length > 3)
+        .slice(-maxMsgs)
+        .map(m => {
+          const mentionMatch = m.body.match(/\[To:(\d+)\s+([^\]]+)\]/);
+          const isMention = !!mentionMatch;
+          const cleanBody = m.body
+            .replace(/\[To:\d+\s+([^\]]+)\]/g, '@$1')
+            .replace(/\[info\][\s\S]*?\[\/info\]/g, '')
+            .replace(/\[.*?\]/g, '')
+            .trim()
+            .slice(0, 800); // 300 → 800字に拡大
+          if (cleanBody.length < 3) return null;
+          return {
+            roomName:    room.name,
+            accountName: m.account.name,
+            body:        cleanBody,
+            sendTime:    m.send_time,
+            isMention,
+          };
+        })
+        .filter((m): m is NonNullable<typeof m> => m !== null);
 
       allMessages.push(...recent);
     }
 
-    // 時系列降順で最大15件
-    allMessages.sort((a, b) => b.sendTime - a.sendTime);
-    res.json({ messages: allMessages.slice(0, 15) });
+    // 時系列昇順（会話の流れが分かるように古い→新しい順）
+    allMessages.sort((a, b) => a.sendTime - b.sendTime);
+    res.json({ messages: allMessages.slice(0, 80), totalUnread });
   }
 );
 
@@ -819,7 +947,37 @@ export const notionPages = onRequest(
       return;
     }
 
-    const data = await response.json();
-    res.json(data);
+    const data = await response.json() as { results: Record<string, unknown>[]; next_cursor?: string };
+
+    // Notion search returns last_edited_by with only user ID; resolve names via /users endpoint
+    const editorIds = new Set<string>();
+    for (const page of data.results) {
+      const userId = (page.last_edited_by as { id?: string } | undefined)?.id;
+      if (userId) editorIds.add(userId);
+    }
+
+    const editorNames: Record<string, string> = {};
+    await Promise.all([...editorIds].slice(0, 10).map(async (userId) => {
+      try {
+        const userRes = await fetch(`https://api.notion.com/v1/users/${userId}`, {
+          headers: { 'Authorization': `Bearer ${token}`, 'Notion-Version': '2022-06-28' },
+        });
+        if (userRes.ok) {
+          const u = await userRes.json() as { name?: string };
+          if (u.name) editorNames[userId] = u.name;
+        }
+      } catch { /* non-critical */ }
+    }));
+
+    // Enrich pages with resolved editor names
+    const enriched = {
+      ...data,
+      results: data.results.map((p) => {
+        const by = p.last_edited_by as { id?: string; name?: string } | undefined;
+        if (!by?.id) return p;
+        return { ...p, last_edited_by: { ...by, name: editorNames[by.id] ?? by.id } };
+      }),
+    };
+    res.json(enriched);
   }
 );

@@ -40,9 +40,12 @@ export default function PlayerScreen() {
   const [totalSec,   setTotalSec]   = useState(script?.estimatedSeconds ?? 0);
   const [rate,       setRate]       = useState(1.0);
 
-  const playerRef = useRef<AudioPlayer | null>(null);
-  const timerRef  = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isAudio   = !!script?.audioUri;
+  const playerRef     = useRef<AudioPlayer | null>(null);
+  const timerRef      = useRef<ReturnType<typeof setInterval> | null>(null);
+  const seekOffsetRef = useRef<number>(0);
+  const startTimeRef  = useRef<number>(Date.now());
+  const rateRef       = useRef<number>(1.0);
+  const isAudio       = !!script?.audioUri;
 
   const progress      = totalSec > 0 ? currentSec / totalSec : 0;
   const activeChapter = script ? chapterAtTime(script.chapters, currentSec) : null;
@@ -118,14 +121,18 @@ export default function PlayerScreen() {
     return () => { cancelled = true; cleanup(); };
   }, []);
 
-  async function startSpeech() {
+  async function startSpeech(fromSec = 0) {
     if (!script) return;
-    setIsPlaying(true); setCurrentSec(0); setTotalSec(script.estimatedSeconds);
-    const startTime = Date.now();
+    clearInterval(timerRef.current!);
+    setIsPlaying(true); setCurrentSec(fromSec); setTotalSec(script.estimatedSeconds);
+    seekOffsetRef.current = fromSec;
+    startTimeRef.current  = Date.now();
+    const estimatedSecs = script.estimatedSeconds;
     timerRef.current = setInterval(() => {
-      setCurrentSec(Math.min((Date.now() - startTime) / 1000 / rate, script.estimatedSeconds));
+      const elapsed = (Date.now() - startTimeRef.current) / 1000 / rateRef.current;
+      setCurrentSec(Math.min(seekOffsetRef.current + elapsed, estimatedSecs));
     }, 250);
-    await speechService.speak(script.fullText, rate as SpeechRate, {
+    await speechService.speak(script.fullText, rateRef.current as SpeechRate, {
       onDone:  () => { setIsPlaying(false); clearInterval(timerRef.current!); },
       onError: () => { setIsPlaying(false); clearInterval(timerRef.current!); },
     });
@@ -154,19 +161,35 @@ export default function PlayerScreen() {
       isPlaying ? playerRef.current.pause() : playerRef.current.play();
     } else {
       if (isPlaying) { await speechService.stop(); clearInterval(timerRef.current!); setIsPlaying(false); }
-      else await startSpeech();
+      else await startSpeech(currentSec); // resume from current position
     }
-  }, [isPlaying, isAudio]);
+  }, [isPlaying, isAudio, currentSec]);
 
   const handleSkip = useCallback(async (deltaSec: number) => {
-    if (isAudio && playerRef.current)
-      await playerRef.current.seekTo(Math.max(0, Math.min(currentSec + deltaSec, totalSec)));
+    const newPos = Math.max(0, Math.min(currentSec + deltaSec, totalSec));
+    setCurrentSec(newPos);
+    if (isAudio && playerRef.current) {
+      try {
+        await playerRef.current.seekTo(newPos);
+      } catch (e) {
+        console.warn('[player] seekTo failed:', e);
+      }
+    } else {
+      seekOffsetRef.current = newPos;
+      startTimeRef.current  = Date.now();
+    }
   }, [isAudio, currentSec, totalSec]);
 
   async function cycleRate() {
     const newRate = SPEECH_RATES[(SPEECH_RATES.indexOf(rate as SpeechRate) + 1) % SPEECH_RATES.length];
     setRate(newRate);
-    if (isAudio && playerRef.current) playerRef.current.setPlaybackRate(newRate);
+    rateRef.current = newRate;
+    if (isAudio && playerRef.current) {
+      playerRef.current.setPlaybackRate(newRate);
+    } else if (isPlaying) {
+      seekOffsetRef.current = currentSec;
+      startTimeRef.current  = Date.now();
+    }
   }
 
   if (!script) {
@@ -191,18 +214,16 @@ export default function PlayerScreen() {
 
         {/* Nav */}
         <View style={styles.nav}>
-          <TouchableOpacity onPress={() => { cleanup(); router.back(); }} style={styles.navBtn}>
+          <TouchableOpacity onPress={() => { cleanup(); router.back(); }} style={styles.navBtn} accessibilityLabel="閉じる">
             <Ionicons name="chevron-down" size={26} color="rgba(255,255,255,0.8)" />
           </TouchableOpacity>
           <View style={styles.navCenter}>
             <Text style={styles.navTitle}>Daily Brief</Text>
             <Text style={styles.navSub}>
-              {new Date().toLocaleDateString('ja-JP', { month: 'long', day: 'numeric' })} • {formatTime(totalSec)}
+              {new Date().toLocaleDateString(undefined, { month: 'long', day: 'numeric' })} • {Math.ceil(totalSec / 60)}分
             </Text>
           </View>
-          <TouchableOpacity style={styles.navBtn}>
-            <Ionicons name="ellipsis-horizontal" size={22} color="rgba(255,255,255,0.5)" />
-          </TouchableOpacity>
+          <View style={styles.navBtn} />
         </View>
 
         {/* ── 3-slot subtitle area ─────────────────────────────────────── */}
@@ -270,7 +291,19 @@ export default function PlayerScreen() {
                   <TouchableOpacity
                     key={ch.id}
                     style={[styles.chapChip, active && styles.chapChipActive]}
-                    onPress={() => { if (isAudio && playerRef.current) playerRef.current.seekTo(ch.startSec); }}
+                    onPress={async () => {
+                      setCurrentSec(ch.startSec);
+                      if (isAudio && playerRef.current) {
+                        try {
+                          await playerRef.current.seekTo(ch.startSec);
+                        } catch (e) {
+                          console.warn('[player] chapter seekTo failed:', e);
+                        }
+                      } else {
+                        seekOffsetRef.current = ch.startSec;
+                        startTimeRef.current  = Date.now();
+                      }
+                    }}
                   >
                     <Ionicons name={ch.iconName as any} size={11} color={active ? '#fff' : 'rgba(255,255,255,0.45)'} />
                     <Text style={[styles.chapText, active && styles.chapTextActive]}>{ch.title}</Text>
@@ -283,24 +316,22 @@ export default function PlayerScreen() {
 
           {/* Playback controls */}
           <View style={styles.controls}>
-            <TouchableOpacity onPress={cycleRate} style={styles.sideControl}>
+            <TouchableOpacity onPress={cycleRate} style={styles.sideControl} accessibilityLabel={`再生速度 ${rate}倍`}>
               <Text style={styles.rateText}>{rate}x</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => handleSkip(-15)} style={styles.skipBtn}>
+            <TouchableOpacity onPress={() => handleSkip(-15)} style={styles.skipBtn} accessibilityLabel="15秒戻す">
               <Ionicons name="play-back" size={20} color="rgba(255,255,255,0.6)" />
               <Text style={styles.skipLabel}>15</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={handlePlayPause} style={styles.playBtn} activeOpacity={0.85}>
+            <TouchableOpacity onPress={handlePlayPause} style={styles.playBtn} activeOpacity={0.85} accessibilityLabel={isPlaying ? '一時停止' : '再生'}>
               <Ionicons name={isPlaying ? 'pause' : 'play'} size={30} color="#0A0A0A"
                 style={!isPlaying ? { marginLeft: 4 } : undefined} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => handleSkip(15)} style={styles.skipBtn}>
+            <TouchableOpacity onPress={() => handleSkip(15)} style={styles.skipBtn} accessibilityLabel="15秒進む">
               <Ionicons name="play-forward" size={20} color="rgba(255,255,255,0.6)" />
               <Text style={styles.skipLabel}>15</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.sideControl}>
-              <Ionicons name="bookmark-outline" size={22} color="rgba(255,255,255,0.5)" />
-            </TouchableOpacity>
+            <View style={styles.sideControl} />
           </View>
 
         </View>
@@ -319,7 +350,7 @@ const styles = StyleSheet.create({
 
   nav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 12 },
   navBtn: {
-    width: 38, height: 38, borderRadius: 19,
+    width: 44, height: 44, borderRadius: 22,
     backgroundColor: 'rgba(255,255,255,0.10)',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)',
     alignItems: 'center', justifyContent: 'center',
@@ -380,13 +411,13 @@ const styles = StyleSheet.create({
   chapChipActive: { backgroundColor: Colors.brand.primary },
   chapText:       { fontSize: 11, color: 'rgba(255,255,255,0.45)', fontWeight: '500' },
   chapTextActive: { color: '#fff', fontWeight: '600' },
-  chapTime:       { fontSize: 10, color: 'rgba(255,255,255,0.3)' },
+  chapTime:       { fontSize: 12, color: 'rgba(255,255,255,0.55)' },
   chapTimeActive: { color: 'rgba(255,255,255,0.80)' },
 
   controls:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 20 },
   sideControl: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   skipBtn:     { width: 48, height: 48, alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  skipLabel:   { fontSize: 8, fontWeight: '700', color: 'rgba(255,255,255,0.4)', position: 'absolute', bottom: 6 },
+  skipLabel:   { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.4)', position: 'absolute', bottom: 6 },
   playBtn: {
     width: 68, height: 68, borderRadius: 34,
     backgroundColor: '#ffffff',

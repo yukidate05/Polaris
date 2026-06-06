@@ -24,7 +24,7 @@ export const slackService = {
     if (!SLACK_CLIENT_ID) throw new Error('EXPO_PUBLIC_SLACK_CLIENT_ID is not set');
     const params = new URLSearchParams({
       client_id:    SLACK_CLIENT_ID,
-      user_scope:   'channels:read,channels:history,groups:read,groups:history',
+      user_scope:   'channels:read,channels:history,groups:read,groups:history,im:read,im:history,users:read',
       redirect_uri: REDIRECT_URI,
     });
     return `${SLACK_AUTH_URL}?${params.toString()}`;
@@ -65,8 +65,7 @@ export const slackService = {
     await setDoc(doc(db, 'users', uid), { slackWorkspaces: updated }, { merge: true });
   },
 
-  async getRecentMessages(): Promise<SlackChannelMessages[]> {
-    const data = await callFunction<{ channels: SlackChannelMessages[] }>('slackMessages', undefined, 'GET');
-    return data.channels;
+  async getRecentMessages(): Promise<{ channels: SlackChannelMessages[]; totalUnread: number }> {
+    return callFunction<{ channels: SlackChannelMessages[]; totalUnread: number }>('slackMessages', undefined, 'GET');
   },
 };

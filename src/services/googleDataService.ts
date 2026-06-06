@@ -7,8 +7,9 @@ const GMAIL_BASE    = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const CALENDAR_BASE = 'https://www.googleapis.com/calendar/v3';
 
 export interface EmailSummary {
-  from:    string;
-  subject: string;
+  from:     string;
+  subject:  string;
+  snippet?: string; // 本文冒頭プレビュー（Gmail snippet）
 }
 
 export interface CalendarEvent {
@@ -75,6 +76,7 @@ interface GmailListResponse {
 }
 
 interface GmailMessageResponse {
+  snippet?: string;
   payload?: {
     headers?: { name: string; value: string }[];
   };
@@ -100,7 +102,8 @@ async function fetchEmails(token: string): Promise<{ unreadCount: number; topEma
   const details = await Promise.allSettled(
     messages.slice(0, 5).map((m) =>
       gGet<GmailMessageResponse>(
-        `${GMAIL_BASE}/messages/${m.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From`,
+        // snippet フィールドも取得（本文プレビュー）
+        `${GMAIL_BASE}/messages/${m.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&fields=snippet,payload(headers)`,
         token
       )
     )
@@ -111,7 +114,13 @@ async function fetchEmails(token: string): Promise<{ unreadCount: number; topEma
     const headers = r.value.payload?.headers ?? [];
     const subject = headers.find((h) => h.name === 'Subject')?.value ?? '件名なし';
     const fromRaw = headers.find((h) => h.name === 'From')?.value ?? '';
-    topEmails.push({ from: parseFromName(fromRaw), subject });
+    // snippet は HTML エンティティをデコードして最大200字
+    const rawSnippet = r.value.snippet ?? '';
+    const snippet = rawSnippet
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+      .slice(0, 200)
+      .trim() || undefined;
+    topEmails.push({ from: parseFromName(fromRaw), subject, snippet });
   }
 
   return { unreadCount, topEmails };

@@ -8,27 +8,25 @@ import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { AuroraBackground, PaywallModal, SubscriptionStatusBanner } from '@components/ui';
+import { AuroraBackground, PaywallModal, SubscriptionStatusBanner, ChatworkIcon } from '@components/ui';
 import { useAuthStore } from '@stores/authStore';
 import { subscriptionService, type AccessStatus } from '@services/subscriptionService';
 import { checkIsPro } from '@lib/revenuecat';
 import { useBriefingStore, type BriefingStatus } from '@stores/briefingStore';
 import { useUserPreferencesStore } from '@stores/userPreferencesStore';
 import { googleDataService, MOCK_GOOGLE_DATA } from '@services/googleDataService';
-import { briefingService } from '@services/briefingService';
+import { briefingService, fetchExternalToolData, type ExternalStats, type ExternalToolData } from '@services/briefingService';
 import { sessionService } from '@services/sessionService';
 import { bgmService } from '@services/bgmService';
 import { useT } from '@/i18n';
 import Constants from 'expo-constants';
 
 const { height: SCREEN_H } = Dimensions.get('window');
-const HERO_H = Math.round(SCREEN_H * 0.60);
+const HERO_H = Math.round(SCREEN_H * 0.50);
 const isExpoGo = Constants.appOwnership === 'expo';
+const AUTO_BRIEFING = true;
+const SKIP_TTS      = false;
 
-const MONTHS = [
-  'January','February','March','April','May','June',
-  'July','August','September','October','November','December',
-];
 
 function getGreetingKey(h: number) {
   if (h < 12) return 'good_morning' as const;
@@ -36,9 +34,8 @@ function getGreetingKey(h: number) {
   return 'good_evening' as const;
 }
 
-function formatDate() {
-  const d = new Date();
-  return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+function formatDate(lang?: string) {
+  return new Intl.DateTimeFormat(lang ?? 'en', { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date());
 }
 
 const STATUS_KEYS: Record<BriefingStatus, 'status_idle'|'status_fetching'|'status_script'|'status_audio'|'status_ready'|'status_error'|'status_quota'> = {
@@ -86,17 +83,20 @@ export default function HomeScreen() {
   const t = useT();
   const hour     = new Date().getHours();
   const greeting = t(getGreetingKey(hour));
-  const dateStr  = formatDate();
+  const dateStr  = formatDate(preferences.language);
 
   const isGenerating = ['fetching', 'generating_script', 'generating_audio'].includes(status);
   const activeTab = 'foryou';
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [paywallStatus,  setPaywallStatus]  = useState<AccessStatus | null>(null);
+  const [localExternalStats, setLocalExternalStats] = useState<ExternalStats | null>(null);
+  const [localExternalData,  setLocalExternalData]  = useState<ExternalToolData | null>(null);
+  const externalDataRef = useRef<ExternalToolData | null>(null);
 
   const generateBriefing = useCallback(async () => {
     if (isGenerating) return;
 
-    // ── 1. まずGoogleデータを取得（アクセス制限に関わらず） ──────────
+    // ── 1. Googleデータを取得 ──────────────────────────────────────────
     setStatus('fetching');
     let data = googleData;
     try {
@@ -106,10 +106,12 @@ export default function HomeScreen() {
 
       if (user?.uid) sessionService.markOpened(user.uid);
 
+      let isMockData = false;
       if (!data) {
         if (isExpoGo || !googleAccessToken) {
           await new Promise((r) => setTimeout(r, 600));
           data = MOCK_GOOGLE_DATA;
+          isMockData = true;
         } else {
           data = await googleDataService.fetchAll(googleAccessToken);
         }
@@ -138,9 +140,11 @@ export default function HomeScreen() {
 
       // ── 3. スクリプト・音声生成 ───────────────────────────────────────
       setStatus('generating_script');
-      const lang = useUserPreferencesStore.getState().preferences.language;
+      const prefs = useUserPreferencesStore.getState().preferences;
+      const lang = prefs.language;
+      const interests = prefs.topicsOfInterest ?? [];
       const sc = await briefingService.generate(
-        data, firstName, [], hasPlayed, user?.uid ?? undefined, sessionData, selectedHostIds, userIsPro, lang
+        data, firstName, interests, hasPlayed, user?.uid ?? undefined, sessionData, selectedHostIds, userIsPro, lang, isMockData, externalDataRef.current, SKIP_TTS
       );
       setScript(sc);
       if (user?.uid) subscriptionService.recordGeneration(user.uid);
@@ -158,7 +162,26 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       bgmService.play();
-    }, [])
+
+      // ブリーフィングと独立して外部ツールの件数を取得・表示
+      if (!user?.uid) return;
+      fetchExternalToolData().then(extData => {
+        externalDataRef.current = extData;
+        setLocalExternalData(extData);
+        const stats: ExternalStats = {};
+        if (extData.slackMessages !== null)
+          stats.slack  = { messageCount: extData.slackTotalUnread || extData.slackMessages.flatMap(ch => ch.messages).length };
+        if (extData.notionPages !== null) {
+          const today = new Date().toDateString();
+          stats.notion = { pageCount: extData.notionPages.filter(p => new Date(p.lastEdited).toDateString() === today).length };
+        }
+        if (extData.teamsChats !== null)
+          stats.teams    = { chatCount: extData.teamsChats.length };
+        if (extData.chatworkMessages !== null)
+          stats.chatwork = { messageCount: extData.chatworkTotalUnread || extData.chatworkMessages.length };
+        setLocalExternalStats(stats);
+      }).catch(() => {});
+    }, [user?.uid])
   );
 
   const generateBriefingRef = useRef(generateBriefing);
@@ -166,7 +189,7 @@ export default function HomeScreen() {
 
   const hasAutoTriggeredRef = useRef(false);
   useEffect(() => {
-    if (status === 'idle' && googleTokenResolved && !hasAutoTriggeredRef.current) {
+    if (AUTO_BRIEFING && status === 'idle' && googleTokenResolved && !hasAutoTriggeredRef.current) {
       hasAutoTriggeredRef.current = true;
       generateBriefingRef.current();
     }
@@ -179,11 +202,12 @@ export default function HomeScreen() {
     router.push('/player');
   };
 
-  const unread      = googleData?.unreadCount         ?? 0;
-  const todayCount  = googleData?.todayEvents?.length  ?? 0;
-  const todayEvs    = googleData?.todayEvents          ?? [];
-  const tomorrowEvs = googleData?.tomorrowEvents       ?? [];
-  const topEmails   = googleData?.topEmails            ?? [];
+  const unread        = googleData?.unreadCount         ?? 0;
+  const todayCount    = googleData?.todayEvents?.length  ?? 0;
+  const todayEvs      = googleData?.todayEvents          ?? [];
+  const tomorrowEvs   = googleData?.tomorrowEvents       ?? [];
+  const topEmails     = googleData?.topEmails            ?? [];
+
 
   return (
     <View style={s.root}>
@@ -209,7 +233,7 @@ export default function HomeScreen() {
           {/* Header */}
           <View style={[s.header, { marginTop: insets.top + 6 }]} pointerEvents="box-none">
             <Text style={s.appTitle}>Polaris</Text>
-            <TouchableOpacity onPress={() => router.push('/(tabs)/settings')} style={s.menuBtn}>
+            <TouchableOpacity onPress={() => router.push('/(tabs)/settings')} style={s.menuBtn} accessibilityLabel="設定を開く">
               <Ionicons name="menu" size={20} color="#fff" />
             </TouchableOpacity>
           </View>
@@ -227,17 +251,31 @@ export default function HomeScreen() {
           {/* サブスクステータス */}
           <SubscriptionStatusBanner />
 
-          {/* Stats bar */}
-          <View style={s.statsBar}>
-            <View style={s.statItem}>
-              <Ionicons name="mail-outline" size={20} color="rgba(255,255,255,0.7)" />
-              <Text style={s.statNum}>{unread}</Text>
-            </View>
-            <View style={s.statDivider} />
-            <View style={s.statItem}>
-              <Ionicons name="calendar-outline" size={20} color="rgba(255,255,255,0.7)" />
-              <Text style={s.statNum}>{todayCount}</Text>
-            </View>
+          {/* Stats grid 3×2 */}
+          <View style={s.statsGrid}>
+            {[
+              { ionicon: 'mail-outline' as const,          count: unread,                                     connected: true },
+              { ionicon: 'calendar-outline' as const,      count: todayCount,                                 connected: true },
+              { ionicon: 'chatbubbles-outline' as const,   count: localExternalStats?.slack?.messageCount,    connected: localExternalStats?.slack    !== undefined },
+              { ionicon: 'document-text-outline' as const, count: localExternalStats?.notion?.pageCount,      connected: localExternalStats?.notion   !== undefined },
+              { ionicon: null,                              count: localExternalStats?.chatwork?.messageCount, connected: localExternalStats?.chatwork !== undefined },
+            ].map(({ ionicon, count, connected }, i) => {
+              const iconColor = connected ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)';
+              return (
+                <View key={i} style={[
+                  s.statCell,
+                  i < 4 && s.statCellDividerRight,
+                ]}>
+                  {ionicon
+                    ? <Ionicons name={ionicon} size={17} color={iconColor} />
+                    : <ChatworkIcon size={17} color={iconColor} />
+                  }
+                  <Text style={[s.statCellNum, !connected && { color: 'rgba(255,255,255,0.2)' }]}>
+                    {connected ? count ?? 0 : '—'}
+                  </Text>
+                </View>
+              );
+            })}
           </View>
 
           {/* Quota exceeded banner */}
@@ -283,6 +321,7 @@ export default function HomeScreen() {
               style={s.tabRefresh}
               onPress={generateBriefing}
               disabled={isGenerating}
+              accessibilityLabel="ブリーフィングを更新"
             >
               <Ionicons name="refresh" size={18} color={isGenerating ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.45)'} />
             </TouchableOpacity>
@@ -295,7 +334,10 @@ export default function HomeScreen() {
               {/* Email highlights */}
               {topEmails.length > 0 && (
                 <View style={s.section}>
-                  <Text style={s.sectionLabel}>✉  {t('todays_mail')}</Text>
+                  <View style={s.sectionLabelRow}>
+                    <Ionicons name="mail-outline" size={12} color="rgba(255,255,255,0.42)" />
+                    <Text style={s.sectionLabel}>{t('todays_mail')}</Text>
+                  </View>
                   <View style={s.listCard}>
                     {topEmails.slice(0, 3).map((e, i) => (
                       <View key={i} style={[s.emailRow, i > 0 && s.rowBorder]}>
@@ -313,7 +355,10 @@ export default function HomeScreen() {
               {/* Today's schedule */}
               {todayEvs.length > 0 && (
                 <View style={s.section}>
-                  <Text style={s.sectionLabel}>📅  {t('todays_schedule')}</Text>
+                  <View style={s.sectionLabelRow}>
+                    <Ionicons name="calendar-outline" size={12} color="rgba(255,255,255,0.42)" />
+                    <Text style={s.sectionLabel}>{t('todays_schedule')}</Text>
+                  </View>
                   <View style={s.listCard}>
                     {todayEvs.slice(0, 4).map((ev, i) => (
                       <View key={i} style={i > 0 ? s.rowBorder : undefined}>
@@ -327,11 +372,112 @@ export default function HomeScreen() {
               {/* Tomorrow */}
               {tomorrowEvs.length > 0 && (
                 <View style={s.section}>
-                  <Text style={s.sectionLabel}>🌙  {t('tomorrows_schedule')}</Text>
+                  <View style={s.sectionLabelRow}>
+                    <Ionicons name="moon-outline" size={12} color="rgba(255,255,255,0.42)" />
+                    <Text style={s.sectionLabel}>{t('tomorrows_schedule')}</Text>
+                  </View>
                   <View style={s.listCard}>
                     {tomorrowEvs.slice(0, 4).map((ev, i) => (
                       <View key={i} style={i > 0 ? s.rowBorder : undefined}>
                         <ScheduleRow ev={ev} />
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* Slack */}
+              {localExternalData?.slackMessages && localExternalData.slackMessages.length > 0 && (
+                <View style={s.section}>
+                  <View style={s.sectionLabelRow}>
+                    <Ionicons name="chatbubbles-outline" size={12} color="rgba(255,255,255,0.42)" />
+                    <Text style={s.sectionLabel}>SLACK</Text>
+                    {(localExternalStats?.slack?.messageCount ?? 0) > 0 && (
+                      <View style={s.countBadge}>
+                        <Text style={s.countBadgeText}>{localExternalStats!.slack!.messageCount}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={s.listCard}>
+                    {localExternalData.slackMessages.slice(0, 3).map((ch, i) => {
+                      const lastMsg = ch.messages[ch.messages.length - 1] ?? '';
+                      const channelLabel = ch.channelName.startsWith('DM') ? ch.channelName : `#${ch.channelName}`;
+                      return (
+                        <View key={i} style={[s.externalRow, i > 0 && s.rowBorder]}>
+                          <View style={s.externalHeader}>
+                            <Text style={s.externalRoomName} numberOfLines={1}>{ch.workspace} / {channelLabel}</Text>
+                            <Text style={s.externalCount}>{ch.messages.length}件</Text>
+                          </View>
+                          {!!lastMsg && (
+                            <Text style={s.externalPreview} numberOfLines={2}>{lastMsg}</Text>
+                          )}
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+
+              {/* Chatwork */}
+              {localExternalData?.chatworkMessages && localExternalData.chatworkMessages.length > 0 && (() => {
+                const rooms: Record<string, typeof localExternalData.chatworkMessages> = {};
+                for (const m of localExternalData.chatworkMessages!) {
+                  if (!rooms[m.roomName]) rooms[m.roomName] = [];
+                  rooms[m.roomName].push(m);
+                }
+                const roomEntries = Object.entries(rooms).slice(0, 4);
+                return (
+                  <View style={s.section}>
+                    <View style={s.sectionLabelRow}>
+                      <ChatworkIcon size={12} color="rgba(255,255,255,0.42)" />
+                      <Text style={s.sectionLabel}>CHATWORK</Text>
+                      {(localExternalStats?.chatwork?.messageCount ?? 0) > 0 && (
+                        <View style={s.countBadge}>
+                          <Text style={s.countBadgeText}>{localExternalStats!.chatwork!.messageCount}</Text>
+                        </View>
+                      )}
+                    </View>
+                    <View style={s.listCard}>
+                      {roomEntries.map(([roomName, msgs], i) => {
+                        const lastMsg = msgs[msgs.length - 1];
+                        const hasMention = msgs.some(m => m.isMention);
+                        return (
+                          <View key={i} style={[s.externalRow, i > 0 && s.rowBorder]}>
+                            <View style={s.externalHeader}>
+                              <Text style={s.externalRoomName} numberOfLines={1}>{roomName}</Text>
+                              <View style={s.externalBadgeRow}>
+                                {hasMention && <View style={s.mentionBadge}><Text style={s.mentionText}>@</Text></View>}
+                                <Text style={s.externalCount}>{msgs.length}件</Text>
+                              </View>
+                            </View>
+                            <Text style={s.externalPreview} numberOfLines={2}>
+                              {lastMsg.accountName}: {lastMsg.body}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                );
+              })()}
+
+              {/* Notion */}
+              {localExternalData?.notionPages && localExternalData.notionPages.length > 0 && (
+                <View style={s.section}>
+                  <View style={s.sectionLabelRow}>
+                    <Ionicons name="document-text-outline" size={12} color="rgba(255,255,255,0.42)" />
+                    <Text style={s.sectionLabel}>NOTION</Text>
+                  </View>
+                  <View style={s.listCard}>
+                    {localExternalData.notionPages.slice(0, 4).map((page, i) => (
+                      <View key={i} style={[s.emailRow, i > 0 && s.rowBorder]}>
+                        <View style={s.emailDot} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={s.emailFrom} numberOfLines={1}>{page.title}</Text>
+                          <Text style={s.emailSubject} numberOfLines={1}>
+                            {page.lastEditedBy ? `${page.lastEditedBy} が更新` : new Date(page.lastEdited).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </Text>
+                        </View>
                       </View>
                     ))}
                   </View>
@@ -373,7 +519,7 @@ const s = StyleSheet.create({
     fontSize: 26, fontWeight: '800', color: '#fff', letterSpacing: -0.6,
   },
   menuBtn: {
-    width: 38, height: 38, borderRadius: 19,
+    width: 44, height: 44, borderRadius: 22,
     backgroundColor: 'rgba(255,255,255,0.18)',
     alignItems: 'center', justifyContent: 'center',
   },
@@ -391,11 +537,11 @@ const s = StyleSheet.create({
   // Below hero
   below: { backgroundColor: '#020610', paddingHorizontal: 22, paddingTop: 2, gap: 18 },
 
-  // Stats
-  statsBar:    { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 36, paddingVertical: 14 },
-  statItem:    { flexDirection: 'row', alignItems: 'center', gap: 9 },
-  statNum:     { fontSize: 22, fontWeight: '600', color: '#fff' },
-  statDivider: { width: 1, height: 22, backgroundColor: 'rgba(255,255,255,0.18)' },
+  // Stats grid 3×2
+  statsGrid:            { flexDirection: 'row', flexWrap: 'wrap', paddingVertical: 2 },
+  statCell:             { width: '20%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 10 },
+  statCellDividerRight: { borderRightWidth: 1, borderRightColor: 'rgba(255,255,255,0.18)' },
+  statCellNum:          { fontSize: 17, fontWeight: '600', color: '#fff' },
 
   // Quota exceeded
   quotaBanner: {
@@ -427,12 +573,13 @@ const s = StyleSheet.create({
     position: 'absolute', bottom: 0, left: 0, right: 0,
     height: 2, backgroundColor: '#fff', borderRadius: 1,
   },
-  tabRefresh: { marginLeft: 'auto' as any, paddingBottom: 13 },
+  tabRefresh: { marginLeft: 'auto' as any, width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   tabBody:    { gap: 22, paddingTop: 6 },
 
   // Section
-  section:      { gap: 10 },
-  sectionLabel: { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.42)', letterSpacing: 0.5 },
+  section:         { gap: 10 },
+  sectionLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  sectionLabel:    { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.42)', letterSpacing: 0.5 },
 
   // List card — dark glass (Huxe style)
   listCard: {
@@ -450,10 +597,22 @@ const s = StyleSheet.create({
 
   // Schedule
   schedRow:  { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14 },
-  schedTime: { fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.38)', width: 40 },
+  schedTime: { fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.55)', width: 40 },
   schedDot:  { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.55)' },
   schedTitle:{ fontSize: 13, fontWeight: '600', color: '#fff' },
-  schedLoc:  { fontSize: 11, color: 'rgba(255,255,255,0.38)', marginTop: 2 },
+  schedLoc:  { fontSize: 12, color: 'rgba(255,255,255,0.55)', marginTop: 2 },
+
+  // External tool rows
+  externalRow:    { paddingHorizontal: 14, paddingVertical: 10, gap: 4 },
+  externalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  externalRoomName: { fontSize: 13, fontWeight: '600', color: '#fff', flex: 1 },
+  externalCount:    { fontSize: 11, color: 'rgba(255,255,255,0.38)', marginLeft: 8 },
+  externalPreview:  { fontSize: 12, color: 'rgba(255,255,255,0.5)', lineHeight: 17 },
+  externalBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  mentionBadge: { backgroundColor: 'rgba(255,100,100,0.25)', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 },
+  mentionText:  { fontSize: 10, fontWeight: '700', color: '#ff6464' },
+  countBadge:   { backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 4 },
+  countBadgeText: { fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.6)' },
 
   // Empty
   emptyState: { alignItems: 'center', paddingVertical: 32 },
