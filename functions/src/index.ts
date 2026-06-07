@@ -178,65 +178,83 @@ export const geminiTts = onRequest(
     const rateLimitOk = await checkRateLimit(uid, 'geminiTtsLastCallAt', 30_000);
     if (!rateLimitOk) { res.status(429).send('rate_limited'); return; }
 
+    // All validation passed — start streaming 200 OK immediately.
+    // iOS NSURLSession has a 60s inactivity timeout (timeoutIntervalForRequest).
+    // Gemini TTS takes 160-200s, so we send periodic space bytes to reset that timer.
+    // JSON.parse() ignores leading whitespace, so the client parses the final JSON correctly.
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    const heartbeat = setInterval(() => { try { res.write(' '); } catch {} }, 15_000);
+
     const GEMINI_TTS_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${GEMINI_KEY.value()}`;
 
-    const response = await fetch(GEMINI_TTS_URL, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: transcript }] }],
-        generationConfig: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            multiSpeakerVoiceConfig: {
-              speakerVoiceConfigs: speakerConfigs.map(sc => ({
-                speaker:     sc.speaker,
-                voiceConfig: { prebuiltVoiceConfig: { voiceName: sc.voice } },
-              })),
+    try {
+      const response = await fetch(GEMINI_TTS_URL, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: transcript }] }],
+          generationConfig: {
+            responseModalities: ['AUDIO'],
+            speechConfig: {
+              multiSpeakerVoiceConfig: {
+                speakerVoiceConfigs: speakerConfigs.map(sc => ({
+                  speaker:     sc.speaker,
+                  voiceConfig: { prebuiltVoiceConfig: { voiceName: sc.voice } },
+                })),
+              },
             },
           },
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      const err = await response.text();
-      res.status(response.status).send(err);
-      return;
-    }
-
-    const data = await response.json() as {
-      candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] } }[];
-    };
-    const pcmBase64 = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data ?? '';
-    if (!pcmBase64) { res.status(500).send('No audio data in Gemini TTS response'); return; }
-
-    const pcm    = Buffer.from(pcmBase64, 'base64');
-    const header = buildWavHeader(pcm.length);
-    const wav    = Buffer.concat([header, pcm]);
-
-    // Upload to Firebase Storage and return a download URL to avoid Cloud Run 32 MB response limit
-    const BUCKET_NAME = 'polaris-app-yukid.firebasestorage.app';
-    const bucket   = getStorage().bucket(BUCKET_NAME);
-    const uuid     = randomUUID();
-    // Fixed filename per user — overwrites previous file, keeping only 1 file per user in Storage
-    const fileName = `audio/${uid}/brief.wav`;
-    const file     = bucket.file(fileName);
-    try {
-      await file.save(wav, {
-        resumable: false,
-        metadata: {
-          contentType: 'audio/wav',
-          metadata: { firebaseStorageDownloadTokens: uuid },
-        },
+        }),
       });
-    } catch (storageErr) {
-      console.error('[geminiTts] Storage upload failed:', storageErr);
-      res.status(500).send(`Storage upload failed: ${storageErr instanceof Error ? storageErr.message : String(storageErr)}`);
-      return;
+
+      if (!response.ok) {
+        const err = await response.text();
+        clearInterval(heartbeat);
+        // Status already committed as 200 — encode error in body so client can detect and fall back
+        res.end(`[geminiTts] ${response.status}: ${err}`);
+        return;
+      }
+
+      const data = await response.json() as {
+        candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] } }[];
+      };
+      const pcmBase64 = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data ?? '';
+      if (!pcmBase64) {
+        clearInterval(heartbeat);
+        res.end('[geminiTts] No audio data in Gemini TTS response');
+        return;
+      }
+
+      const pcm    = Buffer.from(pcmBase64, 'base64');
+      const header = buildWavHeader(pcm.length);
+      const wav    = Buffer.concat([header, pcm]);
+
+      const BUCKET_NAME = 'polaris-app-yukid.firebasestorage.app';
+      const bucket   = getStorage().bucket(BUCKET_NAME);
+      const uuid     = randomUUID();
+      const fileName = `audio/${uid}/brief.wav`;
+      const file     = bucket.file(fileName);
+      try {
+        await file.save(wav, {
+          resumable: false,
+          metadata: {
+            contentType: 'audio/wav',
+            metadata: { firebaseStorageDownloadTokens: uuid },
+          },
+        });
+      } catch (storageErr) {
+        console.error('[geminiTts] Storage upload failed:', storageErr);
+        clearInterval(heartbeat);
+        res.end(`[geminiTts] Storage upload failed: ${storageErr instanceof Error ? storageErr.message : String(storageErr)}`);
+        return;
+      }
+      const audioUrl = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(BUCKET_NAME)}/o/${encodeURIComponent(fileName)}?alt=media&token=${uuid}`;
+      clearInterval(heartbeat);
+      res.end(JSON.stringify({ audioUrl, mimeType: 'audio/wav' }));
+    } catch (err) {
+      clearInterval(heartbeat);
+      res.end(`[geminiTts] ${err instanceof Error ? err.message : String(err)}`);
     }
-    const audioUrl = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(BUCKET_NAME)}/o/${encodeURIComponent(fileName)}?alt=media&token=${uuid}`;
-    res.json({ audioUrl, mimeType: 'audio/wav' });
   }
 );
 
