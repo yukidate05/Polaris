@@ -47,9 +47,6 @@ GoogleService-Info.plist
 # Firebase Functions compiled output
 functions/lib/
 
-# Large audio assets
-assets/bgm/
-assets/voices/
 
 # Logs & test files
 metro-tunnel.log
