@@ -1,6 +1,9 @@
 import type { DialogueTurn } from './claudeService';
 import { getSelectedHosts, DEFAULT_HOST_IDS } from './voiceService';
 import { callFunction } from './functionsService';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '@lib/firebase';
+import { getAuth } from 'firebase/auth';
 
 // Circuit breaker: skip Gemini TTS for the session if quota is exceeded
 let quotaExceeded = false;
@@ -28,6 +31,7 @@ export const geminiTtsService = {
       .map(t => `${t.speaker === 'A' ? hostA.name : hostB.name}: ${t.text}`)
       .join('\n');
 
+    const startTime = Date.now();
     try {
       const { audioUrl } = await callFunction<{ audioUrl: string; mimeType: string }>(
         'geminiTts',
@@ -49,6 +53,30 @@ export const geminiTtsService = {
       if (msg.includes('429') && !msg.includes('rate_limited') && !msg.includes('cooldown_active')) {
         quotaExceeded = true;
         console.warn('[gemini-tts] Gemini API quota exceeded — switching to Google TTS for this session');
+        throw err;
+      }
+
+      // HTTP接続がモバイルNATで切れた可能性あり。サーバーはStorage→Firestoreに書き込み済みの場合がある。
+      // 最大5分間15秒おきにポーリングして結果を取得する。
+      const uid = getAuth().currentUser?.uid;
+      if (uid) {
+        console.log('[gemini-tts] HTTP failed, polling Firestore for TTS result...');
+        const userRef = doc(db, 'users', uid);
+        for (let i = 0; i < 20; i++) {
+          await new Promise<void>(r => setTimeout(r, 15_000));
+          try {
+            const snap = await getDoc(userRef);
+            const data = snap.data();
+            const updatedAt: number = data?.ttsUpdatedAt?.toMillis?.() ?? 0;
+            if (data?.ttsAudioUrl && updatedAt > startTime) {
+              console.log(`[gemini-tts] Firestore poll succeeded on attempt ${i + 1}`);
+              return data.ttsAudioUrl as string;
+            }
+          } catch (pollErr) {
+            console.warn('[gemini-tts] Firestore poll error:', pollErr);
+          }
+        }
+        console.warn('[gemini-tts] Firestore poll timed out, falling back to Google TTS');
       }
       throw err;
     }

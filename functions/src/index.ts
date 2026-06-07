@@ -249,6 +249,11 @@ export const geminiTts = onRequest(
         return;
       }
       const audioUrl = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(BUCKET_NAME)}/o/${encodeURIComponent(fileName)}?alt=media&token=${uuid}`;
+      // Write result to Firestore so client can poll if HTTP connection dropped
+      db.collection('users').doc(uid).set(
+        { ttsAudioUrl: audioUrl, ttsUpdatedAt: FieldValue.serverTimestamp() },
+        { merge: true },
+      ).catch(e => console.error('[geminiTts] Firestore write failed:', e));
       clearInterval(heartbeat);
       res.end(JSON.stringify({ audioUrl, mimeType: 'audio/wav' }));
     } catch (err) {
