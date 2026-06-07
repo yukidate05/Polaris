@@ -150,6 +150,11 @@ export const claudeService = {
       params.userName, params.currentHour, dateStr, params.sessionData ?? null
     );
 
+    const hasSlack    = params.slackMessages    !== undefined;
+    const hasChatwork = params.chatworkMessages !== undefined;
+    const hasNotion   = params.notionPages      !== undefined;
+    const hasExternalTools = hasSlack || hasChatwork || hasNotion;
+
     const ctx = params.userContext;
     const contextBlock = ctx ? `
 ━━━━━━━━━━━━━━━━━━━━━━━━
@@ -162,7 +167,7 @@ ${ctx.pendingFollowups.length > 0 ? `フォローアップ候補:\n${ctx.pending
 ${ctx.topicStatuses && ctx.topicStatuses.length > 0 ? `\n【プロジェクト・話題の直近の状態（Slack/Chatwork/Notionから蓄積）】\n${ctx.topicStatuses.slice(0, 8).map(s => `・${s.topic}: ${s.status}（${s.source}・${s.lastUpdated}）`).join('\n')}` : ''}
 
 使い方:
-- 今日のSlack・Chatwork・Notionのデータに登場する人物・トピックが記憶にある場合、その記憶を「背景」として使ってください
+- ${hasExternalTools ? '今日のSlack・Chatwork・Notionのデータ' : '今日のメール・予定'}に登場する人物・トピックが記憶にある場合、その記憶を「背景」として使ってください
 - 例：「この件は記憶によると先週から続いているXの案件で、現在Yという状態のようです」
 - 記憶にある人物名は、今日のデータに実際に登場している場合のみ言及してください
 ` : '';
@@ -221,7 +226,7 @@ ${params.chatworkMessages.length > 0
 ━━━━━━━━━━━━━━━━━━━━━━━━
 【ブリーフィング品質の要件】
 ━━━━━━━━━━━━━━━━━━━━━━━━
-Slack・Chatwork・Notion・メールのデータを、以下の4軸で必ず分析して台本に盛り込んでください:
+${hasExternalTools ? 'Slack・Chatwork・Notion・' : ''}メールのデータを、以下の4軸で必ず分析して台本に盛り込んでください:
 
 ① 背景・文脈
   「これはどういう件についてのやりとりか」「以前からどういう流れがあるか」を整理する
@@ -237,10 +242,7 @@ Slack・Chatwork・Notion・メールのデータを、以下の4軸で必ず分
 
 【特に重要なルール】
 - 「〇〇からメッセージが来ています」で終わらせない。必ず内容・背景・対応要否まで伝える
-- Chatwork【メンションあり】は最優先で報告。なければ「流れだけ確認しておけばOK」と明示する
-- Slack DMは誰からか・何についてかを説明し、返信要否を判断する
-- Notionは誰が何を更新したか・そのページが何のプロジェクトか・今後どう影響するかを述べる
-- 外部ツールのデータが接続・存在する場合、必ずTop of Mindかnext_stepsで言及すること
+${hasChatwork ? '- Chatwork【メンションあり】は最優先で報告。なければ「流れだけ確認しておけばOK」と明示する\n' : ''}${hasSlack ? '- Slack DMは誰からか・何についてかを説明し、返信要否を判断する\n' : ''}${hasNotion ? '- Notionは誰が何を更新したか・そのページが何のプロジェクトか・今後どう影響するかを述べる\n' : ''}- ${hasExternalTools ? '外部ツールのデータが接続・存在する場合、必ずTop of Mindかnext_stepsで言及すること' : 'メール・予定を中心に、今日最も重要な情報をTop of Mindかnext_stepsで伝えること'}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 【4チャプター構成で生成してください】
@@ -254,7 +256,7 @@ JSONのみを返してください:
       "title": "最優先事項",
       "iconName": "flame-outline",
       "dialogue": [
-        {"speaker": "A", "text": "${returningNote.includes('お帰り') ? 'お帰りの挨拶＋' : '挨拶＋'}今日の最重要事項（緊急メール・Slack DM・Chatworkメンションの件名と背景）を一言で（80〜120字）"},
+        {"speaker": "A", "text": "${returningNote.includes('お帰り') ? 'お帰りの挨拶＋' : '挨拶＋'}今日の最重要事項（緊急メール${hasSlack ? '・Slack DM' : ''}${hasChatwork ? '・Chatworkメンション' : ''}の件名と背景）を一言で（80〜120字）"},
         {"speaker": "B", "text": "その件の現状と問題点・リスク。今すぐ${params.userName}さんが対応すべきか・後回しでいいかの判断を伝える（80〜120字）"},
         {"speaker": "A", "text": "${params.userName}さんが取るべき具体的アクション。「〇〇に返信する」「〇〇を確認する」など動詞で示す（80〜120字）"},
         {"speaker": "B", "text": "次点の優先事項があれば追加。全体を受けて今日の最初の一手をまとめる（80〜120字）"}
@@ -276,7 +278,7 @@ JSONのみを返してください:
       "title": "今後の展望",
       "iconName": "telescope-outline",
       "dialogue": [
-        {"speaker": "A", "text": "明日以降の重要な予定と、Notionで誰が何を更新したか・そのプロジェクトの現状（80〜120字）"},
+        {"speaker": "A", "text": "明日以降の重要な予定${hasNotion ? 'と、Notionで誰が何を更新したか・そのプロジェクトの現状' : 'と今週の山場・注意すべき点'}（80〜120字）"},
         {"speaker": "B", "text": "今対応しておかないと後で困る事項・フォローアップが必要な案件の背景と理由（80〜120字）"},
         {"speaker": "A", "text": "今日のうちに済ませておくべき準備・連絡・確認事項を具体的に（80〜120字）"},
         {"speaker": "B", "text": "今週全体を俯瞰した時の山場・リスクになりそうな日・注意点（80〜120字）"}
@@ -289,7 +291,7 @@ JSONのみを返してください:
       "dialogue": [
         {"speaker": "A", "text": "今日${params.userName}さんが最初に着手すべき一手を具体的に（ツール・メール・会議のどれか、何をするか）（80〜120字）"},
         {"speaker": "B", "text": "2番目・3番目のアクションと優先する理由。後回しにしていい事も明示する（80〜120字）"},
-        {"speaker": "A", "text": "Slack・Chatwork・Notionを踏まえ、今日中に返信・確認・クローズすべき事項のまとめ（80〜120字）"},
+        {"speaker": "A", "text": "${hasExternalTools ? 'Slack・Chatwork・Notionを踏まえ、' : ''}今日中に返信・確認・クローズすべき事項のまとめ（80〜120字）"},
         {"speaker": "B", "text": "${params.userName}さんへの励ましと今日のポジティブな締めくくり（80〜120字）"}
       ]
     }
