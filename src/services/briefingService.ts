@@ -216,12 +216,16 @@ export const briefingService = {
 
     // 記憶・外部ツールデータを並行読み込み（Proユーザーのみ外部ツール＋記憶を使用）
     const emptyExternal: ExternalToolData = { slackMessages: null, slackTotalUnread: null, notionPages: null, teamsChats: null, chatworkMessages: null, chatworkTotalUnread: null };
-    const [userContext, { notionPages, slackMessages, slackTotalUnread, teamsChats, chatworkMessages, chatworkTotalUnread }] = await Promise.all([
+    const [rawContext, { notionPages, slackMessages, slackTotalUnread, teamsChats, chatworkMessages, chatworkTotalUnread }] = await Promise.all([
       uid ? memoryService.getContext(uid).catch(() => null) : Promise.resolve(null),
       isPro
         ? (externalData != null ? Promise.resolve(externalData) : fetchExternalToolData())
         : Promise.resolve(emptyExternal),
     ]);
+    // 非ProユーザーはtopicStatuses（Slack/Chatwork/Notion由来）を除去してClaudeに渡さない
+    const userContext = rawContext && !isPro
+      ? { ...rawContext, topicStatuses: [] }
+      : rawContext;
 
     let rawChapters: ChapterDraft[];
     try {
@@ -328,9 +332,9 @@ export const briefingService = {
     // 記憶を非同期で更新（モックデータ使用時はスキップ）
     if (uid && !isMockData) {
       memoryService.extractAndSave(uid, data, userContext, {
-        slackMessages:    slackMessages,
-        notionPages:      notionPages,
-        chatworkMessages: chatworkMessages,
+        slackMessages:    isPro ? slackMessages    : null,
+        notionPages:      isPro ? notionPages      : null,
+        chatworkMessages: isPro ? chatworkMessages : null,
       }).catch((e) => console.error('[memory] background update failed:', e));
     }
 
