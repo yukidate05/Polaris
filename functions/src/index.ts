@@ -463,7 +463,7 @@ export const slackMessages = onRequest(
     const oldest = Math.floor((Date.now() - 7 * 24 * 60 * 60 * 1000) / 1000).toString(); // 7日間
 
     async function fetchWorkspaceChannels(ws: { teamName: string; accessToken: string }) {
-      type ConvChannel = { id: string; name: string; is_member?: boolean; is_im?: boolean; user?: string };
+      type ConvChannel = { id: string; name: string; is_member?: boolean; is_im?: boolean; user?: string; unread_count?: number };
       type ConvListRes = { ok: boolean; error?: string; channels?: ConvChannel[] };
 
       // private_channel,mpim も試みる。スコープ不足なら public_channel,im にフォールバック
@@ -508,7 +508,9 @@ export const slackMessages = onRequest(
         }
       }
 
-      let totalUnread = 0;
+      // conversations.list の unread_count を使う（実際のSlack未読数）
+      const totalUnread = targets.reduce((sum, c) => sum + (c.unread_count ?? 0), 0);
+
       const results: { workspace: string; channelName: string; messages: string[] }[] = [];
 
       for (const conv of targets) {
@@ -538,7 +540,6 @@ export const slackMessages = onRequest(
           return sender ? `${sender}: ${text}` : text;
         });
 
-        totalUnread += messages.length;
         if (messages.length > 0) {
           const channelName = conv.is_im
             ? `DM${conv.user ? `(${conv.user})` : ''}`
