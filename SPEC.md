@@ -7,6 +7,18 @@ Gmailとカレンダーを取得し、Geminiがデュアルボイスの台本を
 
 ---
 
+## リポジトリ
+
+| ブランチ | 用途 | URL |
+|---|---|---|
+| `master` | アプリ本体（Expo/React Native） | https://github.com/yukidate05/Polaris/tree/master |
+| `main` | GitHub Pages（OAuthコールバック・プライバシーポリシー等HTML） | https://github.com/yukidate05/Polaris/tree/main |
+
+**コミット先は必ず `master` ブランチ。**  
+`main` は GitHub Pages 専用のため、アプリコードを push しないこと。
+
+---
+
 ## 技術スタック
 
 | 項目 | 内容 |
