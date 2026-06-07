@@ -16,8 +16,9 @@ const SLACK_CLIENT_ID     = defineSecret('SLACK_CLIENT_ID');
 const SLACK_CLIENT_SECRET = defineSecret('SLACK_CLIENT_SECRET');
 const TEAMS_CLIENT_ID     = defineSecret('TEAMS_CLIENT_ID');
 const TEAMS_CLIENT_SECRET = defineSecret('TEAMS_CLIENT_SECRET');
-const CHATWORK_CLIENT_ID     = defineSecret('CHATWORK_CLIENT_ID');
-const CHATWORK_CLIENT_SECRET = defineSecret('CHATWORK_CLIENT_SECRET');
+const CHATWORK_CLIENT_ID       = defineSecret('CHATWORK_CLIENT_ID');
+const CHATWORK_CLIENT_SECRET   = defineSecret('CHATWORK_CLIENT_SECRET');
+const REVENUECAT_WEBHOOK_SECRET = defineSecret('REVENUECAT_WEBHOOK_SECRET');
 
 // ── Auth helper ───────────────────────────────────────────────────────────────
 import { getAuth } from 'firebase-admin/auth';
@@ -174,7 +175,7 @@ export const geminiTts = onRequest(
     const access = await checkSubscription(uid);
     if (!access.allowed) { res.status(429).send(access.message); return; }
 
-    const rateLimitOk = await checkRateLimit(uid, 'geminiTtsLastCallAt', 2 * 60_000);
+    const rateLimitOk = await checkRateLimit(uid, 'geminiTtsLastCallAt', 30_000);
     if (!rateLimitOk) { res.status(429).send('rate_limited'); return; }
 
     const GEMINI_TTS_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${GEMINI_KEY.value()}`;
@@ -900,6 +901,44 @@ export const chatworkMessages = onRequest(
     // 時系列昇順（会話の流れが分かるように古い→新しい順）
     allMessages.sort((a, b) => a.sendTime - b.sendTime);
     res.json({ messages: allMessages.slice(0, 80), totalUnread });
+  }
+);
+
+// ── RevenueCat webhook ────────────────────────────────────────────────────────
+export const revenuecatWebhook = onRequest(
+  { secrets: [REVENUECAT_WEBHOOK_SECRET], cors: false, region: 'asia-northeast1' },
+  async (req, res) => {
+    if (req.method !== 'POST') { res.status(405).send('Method Not Allowed'); return; }
+
+    const authHeader = req.headers['authorization'];
+    if (!authHeader || authHeader !== REVENUECAT_WEBHOOK_SECRET.value()) {
+      res.status(401).send('Unauthorized');
+      return;
+    }
+
+    const { event } = req.body as {
+      event?: { type: string; app_user_id: string };
+    };
+
+    if (!event?.app_user_id) { res.status(400).send('Missing event.app_user_id'); return; }
+
+    const uid = event.app_user_id;
+    const ref = db.collection('users').doc(uid);
+
+    const ACTIVATE = ['INITIAL_PURCHASE', 'RENEWAL', 'UNCANCELLATION', 'TRANSFER', 'SUBSCRIBER_ALIAS'];
+    const EXPIRE   = ['EXPIRATION', 'BILLING_ISSUE'];
+
+    if (ACTIVATE.includes(event.type)) {
+      await ref.set({ plan: 'pro' }, { merge: true });
+      console.log(`[rcWebhook] ${event.type} → plan=pro uid=${uid}`);
+    } else if (EXPIRE.includes(event.type)) {
+      await ref.update({ plan: FieldValue.delete() });
+      console.log(`[rcWebhook] ${event.type} → plan removed uid=${uid}`);
+    } else {
+      console.log(`[rcWebhook] ignored event=${event.type} uid=${uid}`);
+    }
+
+    res.status(200).send('OK');
   }
 );
 

@@ -7,3 +7,4 @@ export { TopicTag } from './TopicTag';
 export { PaywallModal } from './PaywallModal';
 export { SubscriptionStatusBanner } from './SubscriptionStatusBanner';
 export { PolarisAlert, type AlertButton } from './PolarisAlert';
+export { ChatworkIcon } from './ChatworkIcon';

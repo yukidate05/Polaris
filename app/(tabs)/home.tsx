@@ -11,7 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { AuroraBackground, PaywallModal, SubscriptionStatusBanner, ChatworkIcon } from '@components/ui';
 import { useAuthStore } from '@stores/authStore';
 import { subscriptionService, type AccessStatus } from '@services/subscriptionService';
-import { checkIsPro } from '@lib/revenuecat';
+import { checkIsPro, getOfferings, purchasePackage } from '@lib/revenuecat';
 import { useBriefingStore, type BriefingStatus } from '@stores/briefingStore';
 import { useUserPreferencesStore } from '@stores/userPreferencesStore';
 import { googleDataService, MOCK_GOOGLE_DATA } from '@services/googleDataService';
@@ -93,6 +93,24 @@ export default function HomeScreen() {
   const [localExternalData,  setLocalExternalData]  = useState<ExternalToolData | null>(null);
   const externalDataRef = useRef<ExternalToolData | null>(null);
 
+  async function handlePaywallUpgrade() {
+    setPaywallVisible(false);
+    if (isExpoGo) { router.push('/(tabs)/settings'); return; }
+    try {
+      const offerings = await getOfferings();
+      const pkg = offerings?.current?.monthly ?? offerings?.current?.availablePackages[0];
+      if (!pkg) { router.push('/(tabs)/settings'); return; }
+      await purchasePackage(pkg);
+      // Re-check Pro status → re-trigger briefing generation
+      const isPro = await checkIsPro().catch(() => false);
+      if (isPro) generateBriefing();
+    } catch (e: unknown) {
+      if (!(e as { userCancelled?: boolean })?.userCancelled) {
+        router.push('/(tabs)/settings');
+      }
+    }
+  }
+
   const generateBriefing = useCallback(async () => {
     if (isGenerating) return;
 
@@ -170,7 +188,7 @@ export default function HomeScreen() {
         setLocalExternalData(extData);
         const stats: ExternalStats = {};
         if (extData.slackMessages !== null)
-          stats.slack  = { messageCount: extData.slackTotalUnread || extData.slackMessages.flatMap(ch => ch.messages).length };
+          stats.slack  = { messageCount: extData.slackTotalUnread ?? extData.slackMessages.flatMap(ch => ch.messages).length };
         if (extData.notionPages !== null) {
           const today = new Date().toDateString();
           stats.notion = { pageCount: extData.notionPages.filter(p => new Date(p.lastEdited).toDateString() === today).length };
@@ -178,7 +196,7 @@ export default function HomeScreen() {
         if (extData.teamsChats !== null)
           stats.teams    = { chatCount: extData.teamsChats.length };
         if (extData.chatworkMessages !== null)
-          stats.chatwork = { messageCount: extData.chatworkTotalUnread || extData.chatworkMessages.length };
+          stats.chatwork = { messageCount: extData.chatworkTotalUnread ?? extData.chatworkMessages.length };
         setLocalExternalStats(stats);
       }).catch(() => {});
     }, [user?.uid])
@@ -214,7 +232,7 @@ export default function HomeScreen() {
       <PaywallModal
         visible={paywallVisible}
         status={paywallStatus}
-        onUpgrade={() => { setPaywallVisible(false); router.push('/(tabs)/settings'); }}
+        onUpgrade={handlePaywallUpgrade}
         onDismiss={() => setPaywallVisible(false)}
       />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scrollContent} bounces>

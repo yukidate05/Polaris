@@ -1,10 +1,10 @@
 import {
   View, Text, ScrollView, TouchableOpacity, Switch, StyleSheet,
-  Modal, FlatList, Animated, Platform,
+  Modal, FlatList, Animated, Platform, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { GradientBackground, GlassCard, PolarisOrb, PolarisAlert, type AlertButton } from '@components/ui';
+import { GradientBackground, GlassCard, PolarisOrb, PolarisAlert, ChatworkIcon, type AlertButton } from '@components/ui';
 import { authService } from '@services/authService';
 import { useAuthStore } from '@stores/authStore';
 import { useUserPreferencesStore } from '@stores/userPreferencesStore';
@@ -21,7 +21,7 @@ import { teamsService } from '@services/teamsService';
 import { chatworkService } from '@services/chatworkService';
 import * as WebBrowser from 'expo-web-browser';
 import { LinearGradient } from 'expo-linear-gradient';
-import { checkIsPro } from '@lib/revenuecat';
+import { checkIsPro, getOfferings, purchasePackage, restorePurchases } from '@lib/revenuecat';
 import { subscriptionService, type AccessStatus } from '@services/subscriptionService';
 
 const isExpoGo = Constants.appOwnership === 'expo';
@@ -37,10 +37,9 @@ const SERVICE_BRANDS: Record<string, { bg: string; iconColor: string }> = {
 };
 
 const STATIC_PROVIDERS = [
-  { id: 'notion',          label: 'Notion',           icon: 'document-text-outline' as const, proOnly: true  },
-  { id: 'slack',           label: 'Slack',             icon: 'chatbubbles-outline'   as const, proOnly: true  },
-  { id: 'microsoft_teams', label: 'Microsoft Teams',   icon: 'people-outline'        as const, proOnly: true  },
-  { id: 'chatwork',        label: 'Chatwork',          icon: 'chatbubble-outline'    as const, proOnly: true  },
+  { id: 'notion',   label: 'Notion',   icon: 'document-text-outline' as const, proOnly: true },
+  { id: 'slack',    label: 'Slack',    icon: 'chatbubbles-outline'   as const, proOnly: true },
+  { id: 'chatwork', label: 'Chatwork', icon: 'flower-outline'        as const, proOnly: true },
 ] as const;
 
 // ── Pulsing connected dot ──────────────────────────────────────────────────────
@@ -121,6 +120,59 @@ export default function SettingsScreen() {
   }, [user?.uid, profile?.plan]);
 
   const userIsPro = accessStatus?.reason === 'pro';
+
+  async function refreshAccessStatus() {
+    const uid = user?.uid;
+    if (!uid) return;
+    const isPro = await checkIsPro().catch(() => false) || profile?.plan === 'pro';
+    const status = await subscriptionService.checkAccess(uid, isPro);
+    setAccessStatus(status);
+  }
+
+  async function handleUpgrade() {
+    if (isExpoGo) {
+      showAlert('テスト環境', 'Expo GoではRevenueCatは使用できません。実機ビルドが必要です。', [{ text: 'OK' }]);
+      return;
+    }
+    try {
+      const offerings = await getOfferings();
+      if (!offerings?.current) {
+        showAlert('エラー', '購入オプションを取得できませんでした。', [{ text: 'OK' }]);
+        return;
+      }
+      const pkg = offerings.current.monthly ?? offerings.current.availablePackages[0];
+      if (!pkg) {
+        showAlert('エラー', '月額プランが見つかりませんでした。', [{ text: 'OK' }]);
+        return;
+      }
+      await purchasePackage(pkg);
+      await refreshAccessStatus();
+      showAlert('購入完了 🎉', 'Polaris Proへようこそ！', [{ text: 'OK' }]);
+    } catch (e: unknown) {
+      if ((e as { userCancelled?: boolean })?.userCancelled) return;
+      showAlert('購入エラー', e instanceof Error ? e.message : String(e), [{ text: 'OK' }]);
+    }
+  }
+
+  async function handleRestore() {
+    if (isExpoGo) {
+      showAlert('テスト環境', 'Expo GoではRevenueCatは使用できません。', [{ text: 'OK' }]);
+      return;
+    }
+    try {
+      const info = await restorePurchases();
+      const active = info.entitlements.active;
+      const isPro = !!active['pro'] || !!active['plus'];
+      await refreshAccessStatus();
+      showAlert(
+        isPro ? '復元完了' : '購入履歴なし',
+        isPro ? 'Polaris Proが復元されました。' : '復元できる購入履歴が見つかりませんでした。',
+        [{ text: 'OK' }]
+      );
+    } catch (e: unknown) {
+      showAlert('エラー', e instanceof Error ? e.message : String(e), [{ text: 'OK' }]);
+    }
+  }
 
   function showProRequired(featureName: string) {
     showAlert('Polaris Pro が必要です', `${featureName}連携はPolaris Proプランの機能です。\nアップグレードしてご利用ください。`, [
@@ -274,10 +326,9 @@ export default function SettingsScreen() {
     { id: 'gmail',           label: 'Gmail',            icon: 'mail-outline'        as const, connected: hasGoogleAccess },
     ...STATIC_PROVIDERS.map((p) => ({
       ...p,
-      connected:  p.id === 'notion'          ? notionConnected
-                : p.id === 'slack'           ? slackWorkspaceCount > 0
-                : p.id === 'microsoft_teams' ? teamsConnected
-                : p.id === 'chatwork'        ? chatworkConnected
+      connected:  p.id === 'notion'   ? notionConnected
+                : p.id === 'slack'    ? slackWorkspaceCount > 0
+                : p.id === 'chatwork' ? chatworkConnected
                 : false,
       slackCount: p.id === 'slack' ? slackWorkspaceCount : undefined,
       locked:     p.proOnly && !userIsPro,
@@ -410,7 +461,10 @@ export default function SettingsScreen() {
                       }
                     >
                       <View style={[styles.serviceIconBox, { backgroundColor: brand.bg }]}>
-                        <Ionicons name={source.icon} size={17} color={brand.iconColor} />
+                        {source.id === 'chatwork'
+                          ? <ChatworkIcon size={17} color={brand.iconColor} />
+                          : <Ionicons name={source.icon} size={17} color={brand.iconColor} />
+                        }
                       </View>
                       <Text style={styles.serviceLabel}>{source.label}</Text>
                       <View style={styles.connectionRight}>
@@ -420,7 +474,7 @@ export default function SettingsScreen() {
                           isConnected && styles.connectionBadgeOn,
                           isLocked    && styles.connectionBadgePro,
                         ]}>
-                          {isLocked && <Ionicons name="lock-closed" size={10} color={Colors.aurora.lavender} style={{ marginRight: 3 }} />}
+                          {isLocked && <Ionicons name="lock-closed" size={12} color={Colors.aurora.lavender} style={{ marginRight: 3 }} />}
                           <Text style={[
                             styles.connectionText,
                             isConnected && styles.connectionTextOn,
@@ -500,10 +554,12 @@ export default function SettingsScreen() {
                     <Text style={styles.planName}>Polaris Pro</Text>
                     <Text style={styles.planDesc}>{t('pro_tagline')}</Text>
                   </View>
-                  <View style={styles.planPriceBox}>
-                    <Text style={styles.planPrice}>{t('pro_price')}</Text>
-                    <Text style={styles.planPriceSub}>{t('per_month')}</Text>
-                  </View>
+                  {!userIsPro && (
+                    <View style={styles.planPriceBox}>
+                      <Text style={styles.planPrice}>{t('pro_price')}</Text>
+                      <Text style={styles.planPriceSub}>{t('per_month')}</Text>
+                    </View>
+                  )}
                 </View>
                 <View style={styles.planFeatures}>
                   {[t('f_unlimited'), t('f_10min'), t('f_notion'), t('f_slack')].map((f) => (
@@ -513,16 +569,37 @@ export default function SettingsScreen() {
                     </View>
                   ))}
                 </View>
-                <TouchableOpacity style={styles.upgradeBtn} activeOpacity={0.85}>
-                  <LinearGradient
-                    colors={[Colors.brand.primary, Colors.aurora.teal]}
-                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                    style={styles.upgradeBtnGrad}
+                {userIsPro ? (
+                  <TouchableOpacity
+                    style={styles.manageBtn}
+                    activeOpacity={0.75}
+                    onPress={() => {
+                      const url = Platform.OS === 'ios'
+                        ? 'itms-apps://apps.apple.com/account/subscriptions'
+                        : 'https://play.google.com/store/account/subscriptions';
+                      Linking.openURL(url).catch(() => {});
+                    }}
                   >
-                    <Text style={styles.upgradeBtnText}>{t('upgrade')}</Text>
-                    <Ionicons name="arrow-forward" size={15} color="#fff" />
-                  </LinearGradient>
-                </TouchableOpacity>
+                    <Text style={styles.manageBtnText}>{t('manage_subscription')}</Text>
+                    <Ionicons name="open-outline" size={13} color="rgba(255,255,255,0.45)" />
+                  </TouchableOpacity>
+                ) : (
+                  <>
+                    <TouchableOpacity style={styles.upgradeBtn} activeOpacity={0.85} onPress={handleUpgrade}>
+                      <LinearGradient
+                        colors={[Colors.brand.primary, Colors.aurora.teal]}
+                        start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                        style={styles.upgradeBtnGrad}
+                      >
+                        <Text style={styles.upgradeBtnText}>{t('upgrade')}</Text>
+                        <Ionicons name="arrow-forward" size={15} color="#fff" />
+                      </LinearGradient>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={handleRestore} style={styles.restoreBtn} activeOpacity={0.6}>
+                      <Text style={styles.restoreBtnText}>購入を復元する</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
               </GlassCard>
             </View>
           </View>
@@ -807,6 +884,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: 'rgba(255,255,255,0.70)',
   },
+  manageBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 46,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    marginTop: 2,
+  },
+  manageBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.55)',
+  },
   upgradeBtn: {
     borderRadius: 14,
     overflow: 'hidden',
@@ -823,6 +917,15 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: '#fff',
+  },
+
+  restoreBtn: {
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  restoreBtnText: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.28)',
   },
 
   // ── Sign out

@@ -11,22 +11,34 @@ async function getIdToken(): Promise<string> {
 export async function callFunction<T>(
   name: string,
   body?: Record<string, unknown>,
-  method: 'GET' | 'POST' = 'POST'
+  method: 'GET' | 'POST' = 'POST',
+  timeoutMs?: number,
 ): Promise<T> {
   const token = await getIdToken();
-  const res = await fetch(`${BASE_URL}/${name}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`[${name}] ${res.status}: ${err}`);
+  const controller = timeoutMs ? new AbortController() : undefined;
+  const timerId = controller
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : undefined;
+
+  try {
+    const res = await fetch(`${BASE_URL}/${name}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller?.signal,
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`[${name}] ${res.status}: ${err}`);
+    }
+
+    return res.json() as Promise<T>;
+  } finally {
+    if (timerId !== undefined) clearTimeout(timerId);
   }
-
-  return res.json() as Promise<T>;
 }
