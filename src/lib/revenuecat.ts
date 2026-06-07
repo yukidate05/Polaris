@@ -21,6 +21,9 @@ export function initRevenueCat(userId?: string) {
     default: '',
   });
   if (!apiKey) return;
+  // test_ keys force-close the app in standalone builds (RevenueCat protection)
+  // They only work in Expo Go / developmentClient builds
+  if (apiKey.startsWith('test_')) return;
 
   if (__DEV__) {
     pkg.default.setLogLevel(pkg.LOG_LEVEL.DEBUG);
