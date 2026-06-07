@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, Animated, Dimensions,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, Animated, PanResponder,
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,9 +15,8 @@ import { sessionService } from '@services/sessionService';
 import { Colors } from '@constants/colors';
 import type { BriefingChapter } from '@services/briefingService';
 
-const CURR_LINE_H  = 34; // lineHeight for current turn text
-const CURR_LINES   = 5;  // max lines shown
-const CURR_SLOT_MAX = CURR_LINE_H * CURR_LINES + 24; // +24 for dot + gap
+const CURR_LINE_H  = 34;
+const CURR_LINES   = 5;
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -47,10 +46,24 @@ export default function PlayerScreen() {
   const rateRef       = useRef<number>(1.0);
   const isAudio       = !!script?.audioUri;
 
+  // refs for PanResponder (stale closure対策)
+  const totalSecRef      = useRef(totalSec);
+  const isAudioRef       = useRef(isAudio);
+  const trackWidthRef    = useRef(0);
+  useEffect(() => { totalSecRef.current = totalSec; }, [totalSec]);
+  useEffect(() => { isAudioRef.current  = isAudio;  }, [isAudio]);
+
+  // subtitle scroll
+  const scrollViewRef      = useRef<ScrollView>(null);
+  const scrollViewHeightRef = useRef(400);
+  const turnLayoutsRef     = useRef<number[]>([]);
+  const userScrollingRef   = useRef(false);
+  const userScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const progress      = totalSec > 0 ? currentSec / totalSec : 0;
   const activeChapter = script ? chapterAtTime(script.chapters, currentSec) : null;
 
-  // ── Dialogue turns with proportional timestamps ──────────────────────────────
+  // ── Dialogue turns ──────────────────────────────────────────────────────────
 
   const dialogueTurns = useMemo(() => {
     const turns = script?.dialogue;
@@ -66,7 +79,7 @@ export default function PlayerScreen() {
 
   const activeTurnIdx = useMemo(() => {
     if (!dialogueTurns.length) return -1;
-    const ahead = currentSec + 0.5; // 音声が字幕より先行する分を補正
+    const ahead = currentSec + 0.5;
     let idx = 0;
     for (let i = 0; i < dialogueTurns.length; i++) {
       if (ahead >= dialogueTurns[i].startSec) idx = i;
@@ -75,12 +88,18 @@ export default function PlayerScreen() {
     return idx;
   }, [currentSec, dialogueTurns]);
 
-  const prevTurn = activeTurnIdx > 0 ? dialogueTurns[activeTurnIdx - 1] : null;
-  const currTurn = activeTurnIdx >= 0 ? dialogueTurns[activeTurnIdx] : null;
-  const nextTurn = activeTurnIdx >= 0 && activeTurnIdx < dialogueTurns.length - 1
-    ? dialogueTurns[activeTurnIdx + 1] : null;
+  // ── Auto-scroll to active turn ───────────────────────────────────────────────
 
-  // ── Fade animation on turn change ────────────────────────────────────────────
+  useEffect(() => {
+    if (userScrollingRef.current || activeTurnIdx < 0) return;
+    const y = turnLayoutsRef.current[activeTurnIdx];
+    if (y !== undefined) {
+      const offset = Math.max(0, y - scrollViewHeightRef.current * 0.35);
+      scrollViewRef.current?.scrollTo({ y: offset, animated: true });
+    }
+  }, [activeTurnIdx]);
+
+  // ── Fade animation on turn change ───────────────────────────────────────────
 
   const fadeAnim   = useRef(new Animated.Value(1)).current;
   const prevIdxRef = useRef(activeTurnIdx);
@@ -94,12 +113,44 @@ export default function PlayerScreen() {
     ]).start();
   }, [activeTurnIdx]);
 
+  // ── Seek (ref-stable for PanResponder) ──────────────────────────────────────
+
+  const seekToImperative = useCallback(async (sec: number) => {
+    const clamped = Math.max(0, Math.min(sec, totalSecRef.current));
+    setCurrentSec(clamped);
+    if (isAudioRef.current && playerRef.current) {
+      try { await playerRef.current.seekTo(clamped); } catch {}
+    } else {
+      seekOffsetRef.current = clamped;
+      startTimeRef.current  = Date.now();
+    }
+  }, []);
+
+  const seekToRef = useRef(seekToImperative);
+  useEffect(() => { seekToRef.current = seekToImperative; }, [seekToImperative]);
+
+  // ── Scrub PanResponder ───────────────────────────────────────────────────────
+
+  const scrubPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder:  () => true,
+      onPanResponderGrant: (e) => {
+        const ratio = Math.max(0, Math.min(1, e.nativeEvent.locationX / (trackWidthRef.current || 1)));
+        seekToRef.current(ratio * totalSecRef.current);
+      },
+      onPanResponderMove: (e) => {
+        const ratio = Math.max(0, Math.min(1, e.nativeEvent.locationX / (trackWidthRef.current || 1)));
+        seekToRef.current(ratio * totalSecRef.current);
+      },
+    })
+  ).current;
+
   // ── Audio setup ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (!script) return;
     let cancelled = false;
-
     if (isAudio) {
       setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: true }).then(() => {
         if (cancelled) return;
@@ -117,7 +168,6 @@ export default function PlayerScreen() {
     } else {
       startSpeech();
     }
-
     return () => { cancelled = true; cleanup(); };
   }, []);
 
@@ -142,14 +192,12 @@ export default function PlayerScreen() {
     if (playerRef.current) { playerRef.current.pause(); playerRef.current.remove(); playerRef.current = null; }
     clearInterval(timerRef.current!);
     speechService.stop();
-
-    // セッション進捗をFirestoreに保存（クロスデバイス引き継ぎ用）
     if (user?.uid && script && totalSec > 0) {
       const chapterIdx   = script.chapters.indexOf(activeChapter ?? script.chapters[0]);
       const topicSummary = script.chapters.map((c) => c.title).join('、');
       sessionService.saveProgress(user.uid, {
-        chapterTitle:  activeChapter?.title ?? script.chapters[0]?.title ?? '',
-        chapterIndex:  Math.max(0, chapterIdx),
+        chapterTitle:   activeChapter?.title ?? script.chapters[0]?.title ?? '',
+        chapterIndex:   Math.max(0, chapterIdx),
         completionRate: Math.min(1, currentSec / totalSec),
         topicSummary,
       });
@@ -161,35 +209,19 @@ export default function PlayerScreen() {
       isPlaying ? playerRef.current.pause() : playerRef.current.play();
     } else {
       if (isPlaying) { await speechService.stop(); clearInterval(timerRef.current!); setIsPlaying(false); }
-      else await startSpeech(currentSec); // resume from current position
+      else await startSpeech(currentSec);
     }
   }, [isPlaying, isAudio, currentSec]);
 
-  const handleSkip = useCallback(async (deltaSec: number) => {
-    const newPos = Math.max(0, Math.min(currentSec + deltaSec, totalSec));
-    setCurrentSec(newPos);
-    if (isAudio && playerRef.current) {
-      try {
-        await playerRef.current.seekTo(newPos);
-      } catch (e) {
-        console.warn('[player] seekTo failed:', e);
-      }
-    } else {
-      seekOffsetRef.current = newPos;
-      startTimeRef.current  = Date.now();
-    }
-  }, [isAudio, currentSec, totalSec]);
+  const handleSkip = useCallback((deltaSec: number) => {
+    seekToImperative(currentSec + deltaSec);
+  }, [currentSec, seekToImperative]);
 
   async function cycleRate() {
     const newRate = SPEECH_RATES[(SPEECH_RATES.indexOf(rate as SpeechRate) + 1) % SPEECH_RATES.length];
-    setRate(newRate);
-    rateRef.current = newRate;
-    if (isAudio && playerRef.current) {
-      playerRef.current.setPlaybackRate(newRate);
-    } else if (isPlaying) {
-      seekOffsetRef.current = currentSec;
-      startTimeRef.current  = Date.now();
-    }
+    setRate(newRate); rateRef.current = newRate;
+    if (isAudio && playerRef.current) playerRef.current.setPlaybackRate(newRate);
+    else if (isPlaying) { seekOffsetRef.current = currentSec; startTimeRef.current = Date.now(); }
   }
 
   if (!script) {
@@ -226,44 +258,54 @@ export default function PlayerScreen() {
           <View style={styles.navBtn} />
         </View>
 
-        {/* ── 3-slot subtitle area ─────────────────────────────────────── */}
+        {/* ── Subtitle area: ScrollView with 3-slot visual ─────────────────── */}
         <View style={styles.subtitleArea}>
-
-          {/* Prev turn — dim, top */}
-          <View style={styles.prevSlot}>
-            {prevTurn ? (
-              <Text style={styles.prevText} numberOfLines={5}>{prevTurn.text}</Text>
-            ) : null}
-          </View>
-
-          {/* Current turn — bright, center */}
-          <Animated.View style={[styles.currSlot, { opacity: fadeAnim }]}>
-            {currTurn ? (
-              <>
-                <View style={styles.activeDot} />
-                <Text style={styles.currText} numberOfLines={CURR_LINES}>
-                  {currTurn.text}
-                </Text>
-              </>
-            ) : null}
-          </Animated.View>
-
-          {/* Next turn — dim, bottom */}
-          <View style={styles.nextSlot}>
-            {nextTurn ? (
-              <>
-                <View style={styles.inactiveDot} />
-                <Text style={styles.nextText} numberOfLines={5}>{nextTurn.text}</Text>
-              </>
-            ) : null}
-          </View>
-
-          {/* Edge fades */}
+          <ScrollView
+            ref={scrollViewRef}
+            style={styles.subtitleScroll}
+            contentContainerStyle={styles.subtitleContent}
+            showsVerticalScrollIndicator={false}
+            onLayout={(e) => { scrollViewHeightRef.current = e.nativeEvent.layout.height; }}
+            onScrollBeginDrag={() => {
+              userScrollingRef.current = true;
+              if (userScrollTimerRef.current) clearTimeout(userScrollTimerRef.current);
+            }}
+            onScrollEndDrag={() => {
+              if (userScrollTimerRef.current) clearTimeout(userScrollTimerRef.current);
+              userScrollTimerRef.current = setTimeout(() => { userScrollingRef.current = false; }, 4000);
+            }}
+            onMomentumScrollEnd={() => {
+              if (userScrollTimerRef.current) clearTimeout(userScrollTimerRef.current);
+              userScrollTimerRef.current = setTimeout(() => { userScrollingRef.current = false; }, 4000);
+            }}
+          >
+            {dialogueTurns.map((turn, idx) => {
+              const isActive = idx === activeTurnIdx;
+              return (
+                <Animated.View
+                  key={idx}
+                  style={[styles.turnRow, isActive && { opacity: fadeAnim }]}
+                  onLayout={(e) => { turnLayoutsRef.current[idx] = e.nativeEvent.layout.y; }}
+                >
+                  {isActive
+                    ? (
+                      <View style={styles.currSlot}>
+                        <View style={styles.activeDot} />
+                        <Text style={styles.currText} numberOfLines={CURR_LINES}>{turn.text}</Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.otherText} numberOfLines={2}>{turn.text}</Text>
+                    )
+                  }
+                </Animated.View>
+              );
+            })}
+          </ScrollView>
           <LinearGradient colors={['rgba(13,17,23,1)', 'rgba(13,17,23,0)']} style={styles.fadeTop}    pointerEvents="none" />
           <LinearGradient colors={['rgba(13,17,23,0)', 'rgba(13,17,23,1)']} style={styles.fadeBottom} pointerEvents="none" />
         </View>
 
-        {/* ── Bottom controls ──────────────────────────────────────────── */}
+        {/* ── Bottom controls ──────────────────────────────────────────────── */}
         <View style={styles.bottomPanel}>
 
           <View style={styles.voiceRow}>
@@ -271,10 +313,15 @@ export default function PlayerScreen() {
             <Text style={styles.voiceLabel}>AI Voice • Polaris</Text>
           </View>
 
-          {/* Progress */}
+          {/* Seekable progress bar */}
           <View style={styles.progressSection}>
-            <View style={styles.progressTrack}>
+            <View
+              style={styles.progressTrack}
+              onLayout={(e) => { trackWidthRef.current = e.nativeEvent.layout.width; }}
+              {...scrubPanResponder.panHandlers}
+            >
               <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+              <View style={[styles.scrubThumb, { left: `${progress * 100}%` }]} />
             </View>
             <View style={styles.timeRow}>
               <Text style={styles.timeText}>{formatTime(currentSec)}</Text>
@@ -291,19 +338,7 @@ export default function PlayerScreen() {
                   <TouchableOpacity
                     key={ch.id}
                     style={[styles.chapChip, active && styles.chapChipActive]}
-                    onPress={async () => {
-                      setCurrentSec(ch.startSec);
-                      if (isAudio && playerRef.current) {
-                        try {
-                          await playerRef.current.seekTo(ch.startSec);
-                        } catch (e) {
-                          console.warn('[player] chapter seekTo failed:', e);
-                        }
-                      } else {
-                        seekOffsetRef.current = ch.startSec;
-                        startTimeRef.current  = Date.now();
-                      }
-                    }}
+                    onPress={() => seekToImperative(ch.startSec)}
                   >
                     <Ionicons name={ch.iconName as any} size={11} color={active ? '#fff' : 'rgba(255,255,255,0.45)'} />
                     <Text style={[styles.chapText, active && styles.chapTextActive]}>{ch.title}</Text>
@@ -359,52 +394,42 @@ const styles = StyleSheet.create({
   navTitle:  { fontSize: 15, fontWeight: '700', color: '#fff' },
   navSub:    { fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: '500' },
 
-  // Subtitle 3-slot
-  subtitleArea: { flex: 1, position: 'relative' },
+  // Subtitle
+  subtitleArea:    { flex: 1, position: 'relative' },
+  subtitleScroll:  { flex: 1 },
+  subtitleContent: { paddingHorizontal: 28, paddingVertical: 140 },
 
-  prevSlot: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    paddingHorizontal: 28,
-    paddingBottom: 28,
-    opacity: 0.28,
-  },
-  prevText: { fontSize: 17, color: '#fff', lineHeight: 26 },
+  turnRow: { opacity: 0.28, marginBottom: 40 },
 
-  currSlot: {
-    flex: 2,
-    maxHeight: CURR_SLOT_MAX,
-    justifyContent: 'center',
-    paddingHorizontal: 28,
-    gap: 12,
-    overflow: 'hidden',
-  },
-  activeDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.brand.primary },
-  currText:   { fontSize: 22, fontWeight: '700', color: '#fff', lineHeight: CURR_LINE_H },
+  // Active turn — same layout as original currSlot
+  currSlot: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  activeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.brand.primary, marginTop: 6, flexShrink: 0 },
+  currText:  { flex: 1, fontSize: 22, fontWeight: '700', color: '#fff', lineHeight: CURR_LINE_H },
 
-  nextSlot: {
-    flex: 1,
-    paddingHorizontal: 28,
-    paddingTop: 28,
-    opacity: 0.28,
-    gap: 10,
-  },
-  inactiveDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.4)' },
-  nextText:    { fontSize: 17, color: '#fff', lineHeight: 26 },
+  // Non-active turns
+  otherText: { fontSize: 17, color: '#fff', lineHeight: 26 },
 
-  fadeTop:    { position: 'absolute', top: 0, left: 0, right: 0, height: 70 },
-  fadeBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 70 },
+  fadeTop:    { position: 'absolute', top: 0,    left: 0, right: 0, height: 80 },
+  fadeBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 80 },
 
   // Bottom panel
   bottomPanel: { paddingHorizontal: 20, paddingBottom: 8, gap: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' },
   voiceRow:   { flexDirection: 'row', alignItems: 'center', gap: 5, paddingTop: 10 },
   voiceLabel: { fontSize: 11, color: Colors.brand.primary, fontWeight: '600' },
 
-  progressSection: { gap: 6 },
-  progressTrack:   { width: '100%', height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
-  progressFill:    { height: '100%', borderRadius: 2, backgroundColor: Colors.brand.primary },
-  timeRow:         { flexDirection: 'row', justifyContent: 'space-between' },
-  timeText:        { fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: '500' },
+  // Seekable progress
+  progressSection: { gap: 8 },
+  progressTrack: {
+    width: '100%', height: 14, justifyContent: 'center',
+  },
+  progressFill: { height: 4, borderRadius: 2, backgroundColor: Colors.brand.primary },
+  scrubThumb: {
+    position: 'absolute', width: 14, height: 14, borderRadius: 7,
+    backgroundColor: '#fff', marginLeft: -7, top: 0,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.4, shadowRadius: 4, elevation: 4,
+  },
+  timeRow:  { flexDirection: 'row', justifyContent: 'space-between' },
+  timeText: { fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: '500' },
 
   chapRow:        { flexDirection: 'row', gap: 8, paddingVertical: 2 },
   chapChip:       { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.07)' },
