@@ -263,51 +263,50 @@ export default function PlayerScreen() {
         </View>
 
         {/* ── Scrollable subtitle area ─────────────────────────────────────── */}
-        <ScrollView
-          ref={scrollViewRef}
-          style={styles.subtitleScroll}
-          contentContainerStyle={styles.subtitleContent}
-          showsVerticalScrollIndicator={false}
-          onScrollBeginDrag={() => {
-            userScrollingRef.current = true;
-            if (userScrollTimerRef.current) clearTimeout(userScrollTimerRef.current);
-          }}
-          onScrollEndDrag={() => {
-            if (userScrollTimerRef.current) clearTimeout(userScrollTimerRef.current);
-            userScrollTimerRef.current = setTimeout(() => {
-              userScrollingRef.current = false;
-            }, 4000);
-          }}
-          onMomentumScrollEnd={() => {
-            if (userScrollTimerRef.current) clearTimeout(userScrollTimerRef.current);
-            userScrollTimerRef.current = setTimeout(() => {
-              userScrollingRef.current = false;
-            }, 4000);
-          }}
-        >
-          <LinearGradient colors={['rgba(13,17,23,1)', 'rgba(13,17,23,0)']} style={styles.fadeTop} pointerEvents="none" />
-          {dialogueTurns.map((turn, idx) => {
-            const isActive = idx === activeTurnIdx;
-            const isPast   = idx < activeTurnIdx;
-            return (
-              <Animated.View
-                key={idx}
-                style={[styles.turnRow, isActive && { opacity: fadeAnim }]}
-                onLayout={(e) => { turnLayoutsRef.current[idx] = e.nativeEvent.layout.y; }}
-              >
-                {isActive && <View style={styles.activeDot} />}
-                <Text style={[
-                  styles.turnText,
-                  isPast   && styles.turnTextPast,
-                  isActive && styles.turnTextActive,
-                ]}>
-                  {turn.text}
-                </Text>
-              </Animated.View>
-            );
-          })}
+        <View style={styles.subtitleArea}>
+          <ScrollView
+            ref={scrollViewRef}
+            style={styles.subtitleScroll}
+            contentContainerStyle={styles.subtitleContent}
+            showsVerticalScrollIndicator={false}
+            onScrollBeginDrag={() => {
+              userScrollingRef.current = true;
+              if (userScrollTimerRef.current) clearTimeout(userScrollTimerRef.current);
+            }}
+            onScrollEndDrag={() => {
+              if (userScrollTimerRef.current) clearTimeout(userScrollTimerRef.current);
+              userScrollTimerRef.current = setTimeout(() => { userScrollingRef.current = false; }, 4000);
+            }}
+            onMomentumScrollEnd={() => {
+              if (userScrollTimerRef.current) clearTimeout(userScrollTimerRef.current);
+              userScrollTimerRef.current = setTimeout(() => { userScrollingRef.current = false; }, 4000);
+            }}
+          >
+            {dialogueTurns.map((turn, idx) => {
+              const isActive = idx === activeTurnIdx;
+              const isPast   = idx < activeTurnIdx;
+              return (
+                <Animated.View
+                  key={idx}
+                  style={[styles.turnRow, isActive && { opacity: fadeAnim }]}
+                  onLayout={(e) => { turnLayoutsRef.current[idx] = e.nativeEvent.layout.y; }}
+                >
+                  {isActive && <View style={styles.activeDot} />}
+                  <Text style={[
+                    styles.turnText,
+                    isPast   && styles.turnTextPast,
+                    isActive && styles.turnTextActive,
+                  ]}>
+                    {turn.text}
+                  </Text>
+                </Animated.View>
+              );
+            })}
+          </ScrollView>
+          {/* Gradient overlays on top of ScrollView */}
+          <LinearGradient colors={['rgba(13,17,23,1)', 'rgba(13,17,23,0)']} style={styles.fadeTop}    pointerEvents="none" />
           <LinearGradient colors={['rgba(13,17,23,0)', 'rgba(13,17,23,1)']} style={styles.fadeBottom} pointerEvents="none" />
-        </ScrollView>
+        </View>
 
         {/* ── Bottom controls ──────────────────────────────────────────── */}
         <View style={styles.bottomPanel}>
@@ -400,26 +399,29 @@ const styles = StyleSheet.create({
   navSub:    { fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: '500' },
 
   // Scrollable subtitle
+  subtitleArea:    { flex: 1, position: 'relative' },
   subtitleScroll:  { flex: 1 },
-  subtitleContent: { paddingHorizontal: 28, paddingVertical: 80, gap: 28 },
+  subtitleContent: { paddingHorizontal: 28, paddingVertical: 160 },
 
   turnRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
+    marginBottom: 32,
+    opacity: 0.28,
   },
   activeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.brand.primary, marginTop: 6, flexShrink: 0 },
   turnText: {
     flex: 1,
     fontSize: 17,
-    color: 'rgba(255,255,255,0.25)',
-    lineHeight: 27,
+    color: '#fff',
+    lineHeight: 26,
   },
-  turnTextPast:   { color: 'rgba(255,255,255,0.35)' },
-  turnTextActive: { fontSize: 22, fontWeight: '700', color: '#fff', lineHeight: 34 },
+  turnTextPast:   {},
+  turnTextActive: { fontSize: 22, fontWeight: '700', lineHeight: 34 },
 
-  fadeTop:    { position: 'absolute', top: 0, left: 0, right: 0, height: 80, zIndex: 1 },
-  fadeBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 80, zIndex: 1 },
+  fadeTop:    { position: 'absolute', top: 0, left: 0, right: 0, height: 120, zIndex: 1 },
+  fadeBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 120, zIndex: 1 },
 
   // Bottom panel
   bottomPanel: { paddingHorizontal: 20, paddingBottom: 8, gap: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' },
