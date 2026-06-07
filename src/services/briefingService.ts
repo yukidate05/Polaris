@@ -214,10 +214,13 @@ export const briefingService = {
   ): Promise<BriefingScript> {
     const currentHour = new Date().getHours();
 
-    // 記憶・外部ツールデータを並行読み込み（externalDataが渡された場合は再取得しない）
+    // 記憶・外部ツールデータを並行読み込み（Proユーザーのみ外部ツール＋記憶を使用）
+    const emptyExternal: ExternalToolData = { slackMessages: null, slackTotalUnread: null, notionPages: null, teamsChats: null, chatworkMessages: null, chatworkTotalUnread: null };
     const [userContext, { notionPages, slackMessages, slackTotalUnread, teamsChats, chatworkMessages, chatworkTotalUnread }] = await Promise.all([
       uid ? memoryService.getContext(uid).catch(() => null) : Promise.resolve(null),
-      externalData != null ? Promise.resolve(externalData) : fetchExternalToolData(),
+      isPro
+        ? (externalData != null ? Promise.resolve(externalData) : fetchExternalToolData())
+        : Promise.resolve(emptyExternal),
     ]);
 
     let rawChapters: ChapterDraft[];

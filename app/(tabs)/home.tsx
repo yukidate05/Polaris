@@ -181,24 +181,31 @@ export default function HomeScreen() {
     useCallback(() => {
       bgmService.play();
 
-      // ブリーフィングと独立して外部ツールの件数を取得・表示
+      // 外部ツールデータはProユーザーのみ取得（無料・トライアルはGmail+Calendarのみ）
       if (!user?.uid) return;
-      fetchExternalToolData().then(extData => {
-        externalDataRef.current = extData;
-        setLocalExternalData(extData);
-        const stats: ExternalStats = {};
-        if (extData.slackMessages !== null)
-          stats.slack  = { messageCount: extData.slackTotalUnread ?? extData.slackMessages.flatMap(ch => ch.messages).length };
-        if (extData.notionPages !== null) {
-          const today = new Date().toDateString();
-          stats.notion = { pageCount: extData.notionPages.filter(p => new Date(p.lastEdited).toDateString() === today).length };
-        }
-        if (extData.teamsChats !== null)
-          stats.teams    = { chatCount: extData.teamsChats.length };
-        if (extData.chatworkMessages !== null)
-          stats.chatwork = { messageCount: extData.chatworkTotalUnread ?? extData.chatworkMessages.length };
-        setLocalExternalStats(stats);
-      }).catch(() => {});
+      Promise.all([checkIsPro(), subscriptionService.checkAccess(user.uid, false)])
+        .then(([isPro, access]) => {
+          if (!isPro && access.reason !== 'pro') return null;
+          return fetchExternalToolData();
+        })
+        .then(extData => {
+          if (!extData) return;
+          externalDataRef.current = extData;
+          setLocalExternalData(extData);
+          const stats: ExternalStats = {};
+          if (extData.slackMessages !== null)
+            stats.slack  = { messageCount: extData.slackTotalUnread ?? extData.slackMessages.flatMap(ch => ch.messages).length };
+          if (extData.notionPages !== null) {
+            const today = new Date().toDateString();
+            stats.notion = { pageCount: extData.notionPages.filter(p => new Date(p.lastEdited).toDateString() === today).length };
+          }
+          if (extData.teamsChats !== null)
+            stats.teams    = { chatCount: extData.teamsChats.length };
+          if (extData.chatworkMessages !== null)
+            stats.chatwork = { messageCount: extData.chatworkTotalUnread ?? extData.chatworkMessages.length };
+          setLocalExternalStats(stats);
+        })
+        .catch(() => {});
     }, [user?.uid])
   );
 
