@@ -71,7 +71,7 @@ export const HOSTS: Host[] = [
   },
 ];
 
-export const DEFAULT_HOST_IDS = ['aria', 'kai'];
+export const DEFAULT_HOST_IDS = ['aria', 'crest'];
 
 export function getHostById(id: string): Host | undefined {
   return HOSTS.find((h) => h.id === id);

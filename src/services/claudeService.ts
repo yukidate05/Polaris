@@ -483,7 +483,7 @@ JSONのみ返してください:
   async generateDeepcast(topic: string): Promise<ClaudeBriefingResult> {
     const prompt = `「${topic}」について、5分のポッドキャスト解説を2人のMCの対話形式で日本語生成してください。
 
-MCs: Aria（A：明るい女性MC） / Kai（B：知的な男性MC）
+MCs: Aria（A：明るい女性MC） / Crest（B：知的な男性MC）
 
 JSONのみを返してください:
 {

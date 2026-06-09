@@ -513,7 +513,8 @@ export const slackMessages = onRequest(
 
       const results: { workspace: string; channelName: string; messages: string[] }[] = [];
 
-      for (const conv of targets) {
+      // 未読があるチャンネルのみ履歴を取得（既読後にプレビューが消えるように）
+      for (const conv of targets.filter(c => (c.unread_count ?? 0) > 0)) {
         const histRes  = await fetch(
           `https://slack.com/api/conversations.history?channel=${conv.id}&oldest=${oldest}&limit=30`,
           { headers: { 'Authorization': `Bearer ${ws.accessToken}` } }

@@ -255,7 +255,7 @@ export default function PlayerScreen() {
               {new Date().toLocaleDateString(undefined, { month: 'long', day: 'numeric' })} • {Math.ceil(totalSec / 60)}分
             </Text>
           </View>
-          <View style={styles.navBtn} />
+          <View style={{ width: 44 }} />
         </View>
 
         {/* ── Subtitle area: ScrollView with 3-slot visual ─────────────────── */}

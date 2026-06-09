@@ -270,7 +270,9 @@ export const briefingService = {
           sessionData,
           hostIds,
           language,
-          notionPages:         notionPages ?? undefined,
+          notionPages:         notionPages
+            ? notionPages.filter(p => new Date(p.lastEdited).toDateString() === new Date().toDateString())
+            : undefined,
           slackMessages:       slackMessages ?? undefined,
           slackTotalUnread:    slackTotalUnread ?? undefined,
           teamsChats:          teamsChats ?? undefined,
