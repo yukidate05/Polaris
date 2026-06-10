@@ -31,6 +31,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
+    permissions: [
+      'FOREGROUND_SERVICE',
+      'FOREGROUND_SERVICE_MEDIA_PLAYBACK',
+    ],
   },
   web: {
     favicon: './assets/favicon.png',
