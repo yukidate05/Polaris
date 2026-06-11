@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState, useRef } from 'react';
+import React, { useEffect, useCallback, useState, useRef } from 'react';
 import { useFocusEffect } from 'expo-router';
 import {
   View, Text, ScrollView, TouchableOpacity,
@@ -349,19 +349,19 @@ export default function HomeScreen() {
                 const done    = i < currentOrder;
                 const active  = i === currentOrder;
                 return (
-                  <View key={step.key} style={s.genStep}>
-                    <View style={[s.genDot, done && s.genDotDone, active && s.genDotActive]}>
-                      {done
-                        ? <Ionicons name="checkmark" size={11} color="#000" />
-                        : <Text style={[s.genDotNum, active && { color: '#000' }]}>{i + 1}</Text>
-                      }
-                    </View>
-                    {i < 2 && <View style={[s.genLine, done && s.genLineDone]} />}
-                    <View style={s.genStepText}>
+                  <React.Fragment key={step.key}>
+                    <View style={s.genStepCol}>
+                      <View style={[s.genDot, done && s.genDotDone, active && s.genDotActive]}>
+                        {done
+                          ? <Ionicons name="checkmark" size={11} color="#000" />
+                          : <Text style={[s.genDotNum, active && { color: '#000' }]}>{i + 1}</Text>
+                        }
+                      </View>
                       <Text style={[s.genLabel, active && s.genLabelActive]}>{step.label}</Text>
                       {active && <Text style={s.genHint}>{step.hint}</Text>}
                     </View>
-                  </View>
+                    {i < 2 && <View style={[s.genLine, done && s.genLineDone]} />}
+                  </React.Fragment>
                 );
               })}
             </View>
@@ -620,9 +620,9 @@ const s = StyleSheet.create({
   // Generation steps
   genSteps: {
     flexDirection: 'row', alignItems: 'flex-start',
-    justifyContent: 'center', paddingVertical: 16, gap: 0,
+    justifyContent: 'center', paddingVertical: 16,
   },
-  genStep: { alignItems: 'center', flexDirection: 'row' },
+  genStepCol: { alignItems: 'center', width: 88 },
   genDot: {
     width: 24, height: 24, borderRadius: 12,
     backgroundColor: 'rgba(255,255,255,0.12)',
@@ -632,10 +632,9 @@ const s = StyleSheet.create({
   genDotDone:   { backgroundColor: '#fff', borderColor: '#fff' },
   genDotActive: { backgroundColor: '#6EE7B7', borderColor: '#6EE7B7' },
   genDotNum:    { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.4)' },
-  genLine:      { width: 28, height: 1, backgroundColor: 'rgba(255,255,255,0.15)', marginTop: -12 },
+  genLine:      { width: 28, height: 1, backgroundColor: 'rgba(255,255,255,0.15)', marginTop: 11 },
   genLineDone:  { backgroundColor: '#fff' },
-  genStepText:  { position: 'absolute', top: 28, alignItems: 'center', width: 72, left: -24 },
-  genLabel:     { fontSize: 10, color: 'rgba(255,255,255,0.35)', textAlign: 'center' },
+  genLabel:     { fontSize: 10, color: 'rgba(255,255,255,0.35)', textAlign: 'center', marginTop: 6 },
   genLabelActive: { color: '#6EE7B7', fontWeight: '600' },
   genHint:      { fontSize: 9, color: 'rgba(255,255,255,0.3)', marginTop: 2 },
 
