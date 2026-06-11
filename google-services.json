@@ -30,6 +30,14 @@
           }
         },
         {
+          "client_id": "439207010999-of7cqq6t9c15iblipq7kmahqsns0e70b.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.yukid.polaris",
+            "certificate_hash": "9e0174020ec92443d5149d1a5b546097c858064c"
+          }
+        },
+        {
           "client_id": "439207010999-sfjegqraftdsodo3db4t7b7738pcdmbi.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
