@@ -15,7 +15,7 @@
       "environment": "development"
     },
     "production": {
-      "autoIncrement": true,
+      "autoIncrement": false,
       "developmentClient": false,
       "environment": "development",
       "android": {

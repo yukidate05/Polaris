@@ -26,7 +26,8 @@
       "googleServicesFile": "./google-services.json",
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "launchMode": "singleTask"
+      "launchMode": "singleTask",
+      "versionCode": 2
     },
     "web": {
       "favicon": "./assets/favicon.png"
