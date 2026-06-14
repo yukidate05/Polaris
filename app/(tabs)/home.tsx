@@ -272,11 +272,17 @@ export default function HomeScreen() {
   useEffect(() => { generateBriefingRef.current = generateBriefing; });
 
   const hasAutoTriggeredRef = useRef(false);
+  const bgEnteredAtRef = useRef<number>(0); // バックグラウンドに入った時刻
 
   // フォアグラウンド復帰時の回復処理
   useEffect(() => {
     const sub = AppState.addEventListener('change', async (nextState) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        bgEnteredAtRef.current = Date.now();
+        return;
+      }
       if (nextState !== 'active') return;
+
       const st = useBriefingStore.getState();
       const uid = getAuth().currentUser?.uid;
       if (!uid) return;
@@ -295,11 +301,12 @@ export default function HomeScreen() {
         return;
       }
 
-      // Phase 1: スクリプト生成中にバックグラウンドへ → JSスレッドが停止した可能性
-      // 5秒待ってもまだ generating_script なら中断と判定して再トリガー
+      // Phase 1: スクリプト生成中にバックグラウンドへ。
+      // 3分以上バックグラウンドにいた = JSスレッドが停止してPromiseが死んだと判定 → 再起動。
+      // 3分未満なら元のリクエストが生きている可能性が高い（2重課金を避ける）。
       if (st.status === 'generating_script') {
-        await new Promise<void>(r => setTimeout(r, 5000));
-        if (useBriefingStore.getState().status === 'generating_script') {
+        const bgDurationMs = Date.now() - bgEnteredAtRef.current;
+        if (bgDurationMs > 3 * 60 * 1000) {
           useBriefingStore.getState().setStatus('idle');
           hasAutoTriggeredRef.current = false;
         }
