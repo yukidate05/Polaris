@@ -40,7 +40,7 @@ function timeContext(hour: number): string {
 }
 
 async function callGemini(prompt: string, systemPrompt: string, useSearch = false): Promise<string> {
-  const { text } = await callFunction<{ text: string }>('gemini', { prompt, systemPrompt, useSearch });
+  const { text } = await callFunction<{ text: string }>('gemini', { prompt, systemPrompt, useSearch }, 'POST', 150_000);
   return text;
 }
 
@@ -431,9 +431,7 @@ JSONのみ返してください:
 - Google検索の最新情報のみ使用。架空ニュース・古い情報禁止
 - 話し言葉のみ。記号・箇条書き禁止
 - ${hostA.name}は${hostA.style}、${hostB.name}は${hostB.style}
-- ${params.userName}さんの記憶・興味に直結するニュースを最優先で選ぶこと
-- ${params.userName}さんの役割・関心に直接関係するニュースを優先選択すること
-- 全体で約5400字（約10分）を目標にしてください`;
+- ${params.userName}さんの記憶・興味に直結するニュースを最優先で選ぶこと`;
 
     const lang2 = LANG_NAMES[params.language ?? 'ja'] ?? 'Japanese';
     const sysPrompt2 = `You are an AI that generates engaging podcast dialogue scripts. Respond ENTIRELY in ${lang2}. All dialogue, chapter titles, and content must be in ${lang2}. Output JSON only.`;

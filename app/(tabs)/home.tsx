@@ -268,31 +268,46 @@ export default function HomeScreen() {
     setup().catch(() => {});
   }, []);
 
-  // フォアグラウンド復帰時: generating_audio 中なら Firestore から TTS 結果を取得
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', async (nextState) => {
-      if (nextState !== 'active') return;
-      const st = useBriefingStore.getState();
-      if (st.status !== 'generating_audio' || !st.script) return;
-      const uid = getAuth().currentUser?.uid;
-      if (!uid) return;
-      try {
-        const snap = await getDoc(doc(db, 'users', uid));
-        const d = snap.data();
-        const updatedAt: number = d?.ttsUpdatedAt?.toMillis?.() ?? 0;
-        if (d?.ttsAudioUrl && updatedAt > Date.now() - 15 * 60 * 1000) {
-          useBriefingStore.getState().updateAudioUri(d.ttsAudioUrl);
-          useBriefingStore.getState().setStatus('ready');
-        }
-      } catch {}
-    });
-    return () => sub.remove();
-  }, []);
-
   const generateBriefingRef = useRef(generateBriefing);
   useEffect(() => { generateBriefingRef.current = generateBriefing; });
 
   const hasAutoTriggeredRef = useRef(false);
+
+  // フォアグラウンド復帰時の回復処理
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async (nextState) => {
+      if (nextState !== 'active') return;
+      const st = useBriefingStore.getState();
+      const uid = getAuth().currentUser?.uid;
+      if (!uid) return;
+
+      // Phase 2: TTS がバックグラウンドで完了 → Firestore から取得
+      if (st.status === 'generating_audio' && st.script) {
+        try {
+          const snap = await getDoc(doc(db, 'users', uid));
+          const d = snap.data();
+          const updatedAt: number = d?.ttsUpdatedAt?.toMillis?.() ?? 0;
+          if (d?.ttsAudioUrl && updatedAt > Date.now() - 15 * 60 * 1000) {
+            useBriefingStore.getState().updateAudioUri(d.ttsAudioUrl);
+            useBriefingStore.getState().setStatus('ready');
+          }
+        } catch {}
+        return;
+      }
+
+      // Phase 1: スクリプト生成中にバックグラウンドへ → JSスレッドが停止した可能性
+      // 5秒待ってもまだ generating_script なら中断と判定して再トリガー
+      if (st.status === 'generating_script') {
+        await new Promise<void>(r => setTimeout(r, 5000));
+        if (useBriefingStore.getState().status === 'generating_script') {
+          useBriefingStore.getState().setStatus('idle');
+          hasAutoTriggeredRef.current = false;
+        }
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
   useEffect(() => {
     if (AUTO_BRIEFING && status === 'idle' && googleTokenResolved && !hasAutoTriggeredRef.current) {
       hasAutoTriggeredRef.current = true;
