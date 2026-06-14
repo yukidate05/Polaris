@@ -47,14 +47,20 @@ async function callGemini(prompt: string, systemPrompt: string, useSearch = fals
 
 function parseChapters(text: string): ChapterDraft[] {
   const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('gemini_parse');
+  if (!match) {
+    console.warn('[parseChapters] no JSON found. preview:', text.slice(0, 200));
+    throw new Error('gemini_parse');
+  }
 
   const parsed = JSON.parse(match[0]);
-  return (parsed.chapters as Array<{
-    id: string; title: string; iconName: string; dialogue: DialogueTurn[];
-  }>).map((c) => ({
+  const chapters = parsed.chapters ?? parsed.briefing?.chapters ?? parsed.script?.chapters;
+  if (!Array.isArray(chapters)) {
+    console.warn('[parseChapters] chapters missing. keys:', Object.keys(parsed), 'preview:', text.slice(0, 200));
+    throw new Error('gemini_parse_no_chapters');
+  }
+  return chapters.map((c: { id: string; title: string; iconName: string; dialogue?: DialogueTurn[] }) => ({
     ...c,
-    text: c.dialogue.map((t) => t.text).join('　'),
+    text: (c.dialogue ?? []).map((t) => t.text).join('　'),
   }));
 }
 
@@ -361,7 +367,7 @@ ${ctx?.recentTopics?.length ? `最近関心のあるトピック: ${ctx.recentTo
 ${params.topEmails?.length ? `最近のメール傾向（業界・興味の手がかり）:\n${params.topEmails.slice(0, 3).map(e => `・${e.from}: ${e.subject}`).join('\n')}` : ''}
 → これらをもとに、${params.userName}さんの仕事・関心に直結するニュースを優先して選んでください。` : '';
 
-    const prompt = `${params.userName}さん向けの今日のニュースキャストを、2人のMCの対話形式で日本語生成してください。
+    const prompt = `${params.userName}さんの興味・記憶をもとにした今日のニュースキャストを、2人のMCの対話形式で生成してください。
 Google検索で取得した最新情報を使い、実際のニュースのみ紹介してください。架空・古い情報は禁止です。
 
 MCの設定:
@@ -372,93 +378,48 @@ MCの設定:
 【ユーザーの興味・関心】${interestText}
 ${personalizationBlock}
 
-【6つのセクション構成（全体で約10分・約5400字）】
-1. Top News（今日のトップニュース）: ${params.userName}さんの関心・業界に最も関連する注目ニュース
-2. Industry（業界・ビジネス動向）: ${interestText}に関連した最新トレンド・市場動向
-3. Technology（テクノロジー）: AI・テック分野の最新動向（${params.userName}さんの仕事への影響も）
-4. Deep Dive（深掘り分析）: 上記で最も重要なトピックの詳細背景・今後の展望
-5. Global（グローバル視点）: 国際動向と日本・アジアへの影響
-6. Wrap-up（締めくくり）: 今日の総括と${params.userName}さんへの一言
+【3つのセクション構成（全体で約5分・約1500字）】
+1. 注目ニュース: ${params.userName}さんの関心・記憶・業界に最も直結するニュース1〜2本を深く掘り下げる
+2. 業界・テクノロジー: ${interestText}に関連した最新動向とAI・テックの影響
+3. 今週の視点: 今週${params.userName}さんが意識すべきトレンドと具体的なアクションヒント
 
 JSONのみ返してください:
 {
   "chapters": [
     {
-      "id": "news_top",
-      "title": "トップニュース",
+      "id": "news_spotlight",
+      "title": "注目ニュース",
       "iconName": "globe-outline",
       "dialogue": [
-        {"speaker": "A", "text": "今日の最注目ニュース紹介（${params.userName}さんの関心に関連）（80〜120字）"},
-        {"speaker": "B", "text": "背景・重要性のコメント（80〜120字）"},
-        {"speaker": "A", "text": "具体的な影響・ポイント（80〜120字）"},
-        {"speaker": "B", "text": "80〜120字のセリフ"},
-        {"speaker": "A", "text": "80〜120字のセリフ"},
-        {"speaker": "B", "text": "80〜120字のセリフ"}
+        {"speaker": "A", "text": "${params.userName}さんの関心に直結する今日の最注目ニュースを紹介（具体的な企業名・数字を含む）（80〜120字）"},
+        {"speaker": "B", "text": "そのニュースの背景と業界への影響・重要性を解説（80〜120字）"},
+        {"speaker": "A", "text": "${params.userName}さんの仕事・関心への具体的な影響と注目ポイント（80〜120字）"},
+        {"speaker": "B", "text": "関連する2本目のニュースまたは同トピックの深掘り（80〜120字）"},
+        {"speaker": "A", "text": "このニュースを受けて${params.userName}さんが今週意識すべきことをまとめ（80〜120字）"}
       ]
     },
     {
       "id": "news_industry",
-      "title": "業界動向",
+      "title": "業界・テクノロジー",
       "iconName": "trending-up-outline",
       "dialogue": [
-        {"speaker": "B", "text": "業界・ビジネスニュース紹介（80〜120字）"},
-        {"speaker": "A", "text": "影響・注目ポイント（80〜120字）"},
-        {"speaker": "B", "text": "80〜120字のセリフ"},
-        {"speaker": "A", "text": "80〜120字のセリフ"},
-        {"speaker": "B", "text": "80〜120字のセリフ"},
-        {"speaker": "A", "text": "80〜120字のセリフ"}
+        {"speaker": "B", "text": "${interestText}に関連した最新の業界・ビジネス動向を紹介（具体的な事例・数字付き）（80〜120字）"},
+        {"speaker": "A", "text": "AI・テクノロジー分野の最新ニュースと${params.userName}さんへの実務的影響（80〜120字）"},
+        {"speaker": "B", "text": "業界トレンドの今後の展望と注意すべきリスク（80〜120字）"},
+        {"speaker": "A", "text": "国際・マクロ動向が${params.userName}さんの業界・仕事に与える影響（80〜120字）"},
+        {"speaker": "B", "text": "今週特にウォッチすべき企業・市場・動向のまとめ（80〜120字）"}
       ]
     },
     {
-      "id": "news_tech",
-      "title": "テクノロジー",
-      "iconName": "hardware-chip-outline",
+      "id": "news_insight",
+      "title": "今週の視点",
+      "iconName": "bulb-outline",
       "dialogue": [
-        {"speaker": "A", "text": "テック・AIニュース紹介（80〜120字）"},
-        {"speaker": "B", "text": "解説・コメント（80〜120字）"},
-        {"speaker": "A", "text": "80〜120字のセリフ"},
-        {"speaker": "B", "text": "80〜120字のセリフ"},
-        {"speaker": "A", "text": "80〜120字のセリフ"},
-        {"speaker": "B", "text": "80〜120字のセリフ"}
-      ]
-    },
-    {
-      "id": "news_deepdive",
-      "title": "深掘り分析",
-      "iconName": "search-outline",
-      "dialogue": [
-        {"speaker": "A", "text": "今日の最重要トピックの詳細解説（80〜120字）"},
-        {"speaker": "B", "text": "背景・歴史的文脈のコメント（80〜120字）"},
-        {"speaker": "A", "text": "今後の展望と${params.userName}さんへの影響（80〜120字）"},
-        {"speaker": "B", "text": "80〜120字のセリフ"},
-        {"speaker": "A", "text": "80〜120字のセリフ"},
-        {"speaker": "B", "text": "80〜120字のセリフ"}
-      ]
-    },
-    {
-      "id": "news_global",
-      "title": "グローバル動向",
-      "iconName": "earth-outline",
-      "dialogue": [
-        {"speaker": "B", "text": "国際的な視点からのニュース紹介（80〜120字）"},
-        {"speaker": "A", "text": "日本・アジアへの影響（80〜120字）"},
-        {"speaker": "B", "text": "80〜120字のセリフ"},
-        {"speaker": "A", "text": "80〜120字のセリフ"},
-        {"speaker": "B", "text": "80〜120字のセリフ"},
-        {"speaker": "A", "text": "80〜120字のセリフ"}
-      ]
-    },
-    {
-      "id": "news_wrapup",
-      "title": "今日のまとめ",
-      "iconName": "checkmark-circle-outline",
-      "dialogue": [
-        {"speaker": "B", "text": "今日のニュース総括（80〜120字）"},
-        {"speaker": "A", "text": "${params.userName}さんの仕事・関心への具体的なヒント（80〜120字）"},
-        {"speaker": "B", "text": "締めの言葉（80〜120字）"},
-        {"speaker": "A", "text": "80〜120字のセリフ"},
-        {"speaker": "B", "text": "80〜120字のセリフ"},
-        {"speaker": "A", "text": "80〜120字のセリフ"}
+        {"speaker": "A", "text": "今日のニュースを踏まえ${params.userName}さんの業界で今週最も重要な1つのテーマを提示（80〜120字）"},
+        {"speaker": "B", "text": "そのテーマに対して${params.userName}さんが今週取れる具体的なアクション（80〜120字）"},
+        {"speaker": "A", "text": "今週押さえておくべきキーワード・トレンドワードと背景説明（80〜120字）"},
+        {"speaker": "B", "text": "来週以降に向けた展望と${params.userName}さんへの準備アドバイス（80〜120字）"},
+        {"speaker": "A", "text": "${params.userName}さんへの励ましと今日・今週のポジティブな締めくくり（80〜120字）"}
       ]
     }
   ]
@@ -466,9 +427,11 @@ JSONのみ返してください:
 
 制約:
 - 各セリフは必ず80字以上120字以下（厳守）
+- 各chapterは5セリフの対話（全体で約1500字・約5分）
 - Google検索の最新情報のみ使用。架空ニュース・古い情報禁止
 - 話し言葉のみ。記号・箇条書き禁止
 - ${hostA.name}は${hostA.style}、${hostB.name}は${hostB.style}
+- ${params.userName}さんの記憶・興味に直結するニュースを最優先で選ぶこと
 - ${params.userName}さんの役割・関心に直接関係するニュースを優先選択すること
 - 全体で約5400字（約10分）を目標にしてください`;
 

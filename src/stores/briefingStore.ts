@@ -18,12 +18,13 @@ interface BriefingStore {
   error:         string | null;
   hasPlayed:     boolean; // true after first play → triggers "お帰り" on next generation
 
-  setStatus:     (s: BriefingStatus) => void;
-  setGoogleData: (d: GoogleData) => void;
-  setScript:     (s: BriefingScript) => void;
-  setError:      (e: string) => void;
-  setHasPlayed:  (v: boolean) => void;
-  reset:         () => void;
+  setStatus:       (s: BriefingStatus) => void;
+  setGoogleData:   (d: GoogleData) => void;
+  setScript:       (s: BriefingScript) => void;
+  updateAudioUri:  (uri: string | null) => void;
+  setError:        (e: string) => void;
+  setHasPlayed:    (v: boolean) => void;
+  reset:           () => void;
 }
 
 const initial = {
@@ -37,10 +38,11 @@ const initial = {
 export const useBriefingStore = create<BriefingStore>((set) => ({
   ...initial,
 
-  setStatus:     (status)     => set({ status }),
-  setGoogleData: (googleData) => set({ googleData }),
-  setScript:     (script)     => set({ script, status: 'ready' }),
-  setError:      (error)      => set({ error, status: 'error' }),
-  setHasPlayed:  (hasPlayed)  => set({ hasPlayed }),
-  reset:         ()           => set(initial),
+  setStatus:      (status)     => set({ status }),
+  setGoogleData:  (googleData) => set({ googleData }),
+  setScript:      (script)     => set({ script, status: 'ready' }),
+  updateAudioUri: (uri)        => set(state => ({ script: state.script ? { ...state.script, audioUri: uri } : state.script })),
+  setError:       (error)      => set({ error, status: 'error' }),
+  setHasPlayed:   (hasPlayed)  => set({ hasPlayed }),
+  reset:          ()           => set(initial),
 }));

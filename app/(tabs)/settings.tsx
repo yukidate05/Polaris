@@ -191,6 +191,7 @@ export default function SettingsScreen() {
           onPress: async () => {
             await notionService.disconnect();
             setNotionConnected(false);
+            useBriefingStore.getState().reset();
           },
         },
       ]);
@@ -234,6 +235,7 @@ export default function SettingsScreen() {
             await slackService.disconnectAll();
             setSlackWorkspaces([]);
             setSlackWorkspaceCount(0);
+            useBriefingStore.getState().reset();
           },
         },
       ];
@@ -261,6 +263,7 @@ export default function SettingsScreen() {
           onPress: async () => {
             await chatworkService.disconnect();
             setChatworkConnected(false);
+            useBriefingStore.getState().reset();
           },
         },
       ]);
@@ -293,6 +296,7 @@ export default function SettingsScreen() {
           onPress: async () => {
             await teamsService.disconnect();
             setTeamsConnected(false);
+            useBriefingStore.getState().reset();
           },
         },
       ]);
@@ -356,6 +360,31 @@ export default function SettingsScreen() {
     } catch (e: unknown) {
       showAlert(t('connect_error'), e instanceof Error ? e.message : String(e), [{ text: 'OK' }]);
     }
+  }
+
+  async function handleDeleteAccount() {
+    showAlert('アカウントを削除', 'アカウントとすべてのデータが完全に削除されます。この操作は取り消せません。', [
+      { text: 'キャンセル', style: 'cancel' },
+      {
+        text: '削除する', style: 'destructive',
+        onPress: async () => {
+          try {
+            const { bgmService } = await import('@services/bgmService');
+            bgmService.stop();
+            await authService.deleteAccount();
+            resetAuth();
+            router.replace('/(onboarding)/welcome');
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (msg.includes('requires-recent-login')) {
+              showAlert('再認証が必要', '一度ログアウトして再度ログインしてからアカウントを削除してください。', [{ text: 'OK' }]);
+            } else {
+              showAlert('エラー', msg, [{ text: 'OK' }]);
+            }
+          }
+        },
+      },
+    ]);
   }
 
   async function handleSignOut() {
@@ -562,7 +591,7 @@ export default function SettingsScreen() {
                   )}
                 </View>
                 <View style={styles.planFeatures}>
-                  {[t('f_unlimited'), t('f_10min'), t('f_notion'), t('f_slack')].map((f) => (
+                  {[t('f_unlimited'), t('f_10min'), t('f_notion'), t('f_slack'), t('f_chatwork')].map((f) => (
                     <View key={f} style={styles.planFeatureRow}>
                       <Ionicons name="checkmark-circle" size={14} color={Colors.aurora.teal} />
                       <Text style={styles.planFeatureText}>{f}</Text>
@@ -608,6 +637,11 @@ export default function SettingsScreen() {
           <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut} activeOpacity={0.7}>
             <Ionicons name="log-out-outline" size={16} color={Colors.error} />
             <Text style={styles.signOutText}>{t('sign_out')}</Text>
+          </TouchableOpacity>
+
+          {/* ── Delete account ── */}
+          <TouchableOpacity style={styles.deleteAccountBtn} onPress={handleDeleteAccount} activeOpacity={0.7}>
+            <Text style={styles.deleteAccountText}>アカウントを削除</Text>
           </TouchableOpacity>
 
           <Text style={styles.version}>Polaris v1.0.0</Text>
@@ -940,6 +974,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: Colors.error,
+  },
+
+  // ── Delete account
+  deleteAccountBtn: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  deleteAccountText: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.22)',
+    textDecorationLine: 'underline',
   },
   version: {
     textAlign: 'center',

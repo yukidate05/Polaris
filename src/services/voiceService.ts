@@ -45,7 +45,7 @@ export const HOSTS: Host[] = [
     id: 'crest', name: 'Crest', voice: 'Charon', gender: 'M',
     mood: '深みと安定感',
     description: '重厚感のある男性MC。落ち着いた声で重要な情報を的確に伝える',
-    style: '「〜である」「重要なのは〜」「要点をまとめると」など力強い語尾',
+    style: '「〜です」「〜ます」「重要なのは〜です」「要点をまとめますと」などの丁寧語で力強く語りかける',
     colors: ['#6EE7B7', '#14B8A6'],
   },
   {

@@ -73,7 +73,7 @@ async function checkRateLimit(uid: string, field: string, windowMs: number): Pro
 
 // ── Gemini proxy ──────────────────────────────────────────────────────────────
 export const gemini = onRequest(
-  { secrets: [GEMINI_KEY], cors: true, region: 'asia-northeast1' },
+  { secrets: [GEMINI_KEY], cors: true, region: 'asia-northeast1', timeoutSeconds: 180 },
   async (req, res) => {
     if (req.method !== 'POST') { res.status(405).send('Method Not Allowed'); return; }
 
@@ -88,8 +88,8 @@ export const gemini = onRequest(
 
     if (!prompt || !systemPrompt) { res.status(400).send('Missing prompt or systemPrompt'); return; }
 
-    // Input length validation
-    if (prompt.length > 30_000)       { res.status(400).send('prompt too long'); return; }
+    // Input length validation (Gemini 2.5 Flash supports 1M token context)
+    if (prompt.length > 200_000)      { res.status(400).send('prompt too long'); return; }
     if (systemPrompt.length > 10_000) { res.status(400).send('systemPrompt too long'); return; }
 
     // Server-side subscription check
@@ -121,8 +121,15 @@ export const gemini = onRequest(
       return;
     }
 
-    const data = await response.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    const data = await response.json() as { candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[]; promptFeedback?: unknown };
+    const parts = data.candidates?.[0]?.content?.parts ?? [];
+    // Gemini 2.5 Flash returns thinking tokens (thought: true) before the actual response
+    const text = parts.find(p => !p.thought)?.text ?? parts[0]?.text ?? '';
+    // Always log response shape for diagnostics
+    console.log(`[gemini] parts=${parts.length} textLen=${text.length} preview=${text.slice(0, 80).replace(/\n/g, ' ')}`);
+    if (!text || text.length < 100) {
+      console.error('[gemini] suspicious response - parts:', JSON.stringify(parts).slice(0, 500), 'promptFeedback:', JSON.stringify(data.promptFeedback));
+    }
     res.json({ text });
   }
 );
@@ -875,8 +882,6 @@ export const chatworkMessages = onRequest(
     const fallbackRooms = rooms.sort((a, b) => b.last_update_time - a.last_update_time).slice(0, 3);
     const topRooms      = unreadRooms.length > 0 ? unreadRooms : fallbackRooms;
 
-    // 未読ルームは7日分、フォールバックルームは48時間分
-    const since7d  = Math.floor((Date.now() - 7  * 24 * 60 * 60 * 1000) / 1000);
     const since48h = Math.floor((Date.now() - 48 * 60 * 60 * 1000) / 1000);
 
     const allMessages: Array<{ roomName: string; accountName: string; body: string; sendTime: number; isMention: boolean }> = [];
@@ -894,8 +899,8 @@ export const chatworkMessages = onRequest(
         send_time: number;
       }>;
 
-      const since    = room.unread_num > 0 ? since7d : since48h;
-      const maxMsgs  = room.unread_num > 0 ? 30 : 10; // 未読ルームは多めに取得
+      const since    = since48h;
+      const maxMsgs  = 5; // ルームあたり最大5件（合計20件上限）
 
       const recent = msgs
         .filter(m => m.send_time >= since && m.body && m.body.trim().length > 3)
@@ -925,7 +930,7 @@ export const chatworkMessages = onRequest(
 
     // 時系列昇順（会話の流れが分かるように古い→新しい順）
     allMessages.sort((a, b) => a.sendTime - b.sendTime);
-    res.json({ messages: allMessages.slice(0, 80), totalUnread });
+    res.json({ messages: allMessages.slice(0, 20), totalUnread });
   }
 );
 

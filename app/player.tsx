@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, Animated, PanResponder,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, Animated, PanResponder, Dimensions,
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,6 +17,7 @@ import type { BriefingChapter } from '@services/briefingService';
 
 const CURR_LINE_H  = 34;
 const CURR_LINES   = 5;
+const FAR_H        = 72; // compact height for far turns (3 lines × lineHeight 20 + breathing room)
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -34,10 +35,11 @@ export default function PlayerScreen() {
   const { script } = useBriefingStore();
   const { user }   = useAuthStore();
 
-  const [isPlaying,  setIsPlaying]  = useState(false);
-  const [currentSec, setCurrentSec] = useState(0);
-  const [totalSec,   setTotalSec]   = useState(script?.estimatedSeconds ?? 0);
-  const [rate,       setRate]       = useState(1.0);
+  const [isPlaying,   setIsPlaying]   = useState(false);
+  const [currentSec,  setCurrentSec]  = useState(0);
+  const [totalSec,    setTotalSec]    = useState(script?.estimatedSeconds ?? 0);
+  const [rate,        setRate]        = useState(1.0);
+  const [syncOffset,  setSyncOffset]  = useState(-1.0); // subtitle lag vs audio (seconds)
 
   const playerRef     = useRef<AudioPlayer | null>(null);
   const timerRef      = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -53,12 +55,17 @@ export default function PlayerScreen() {
   useEffect(() => { totalSecRef.current = totalSec; }, [totalSec]);
   useEffect(() => { isAudioRef.current  = isAudio;  }, [isAudio]);
 
+
   // subtitle scroll
-  const scrollViewRef      = useRef<ScrollView>(null);
+  const scrollViewRef       = useRef<ScrollView>(null);
   const scrollViewHeightRef = useRef(400);
-  const turnLayoutsRef     = useRef<number[]>([]);
-  const userScrollingRef   = useRef(false);
-  const userScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const userScrollingRef    = useRef(false);
+  const userScrollTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // slot height — measured from actual ScrollView layout (1/3 of visible area)
+  const [slotH, setSlotH] = useState(Math.round((Dimensions.get('window').height - 280) / 3));
+  const slotHRef = useRef(slotH);
+  useEffect(() => { slotHRef.current = slotH; }, [slotH]);
 
   const progress      = totalSec > 0 ? currentSec / totalSec : 0;
   const activeChapter = script ? chapterAtTime(script.chapters, currentSec) : null;
@@ -79,25 +86,25 @@ export default function PlayerScreen() {
 
   const activeTurnIdx = useMemo(() => {
     if (!dialogueTurns.length) return -1;
-    const ahead = currentSec + 0.5;
+    const ahead = currentSec + syncOffset;
     let idx = 0;
     for (let i = 0; i < dialogueTurns.length; i++) {
       if (ahead >= dialogueTurns[i].startSec) idx = i;
       else break;
     }
     return idx;
-  }, [currentSec, dialogueTurns]);
+  }, [currentSec, dialogueTurns, syncOffset]);
 
   // ── Auto-scroll to active turn ───────────────────────────────────────────────
+  // Each turn has height=slotH, content starts after paddingTop=slotH.
+  // To center turn N in the middle slot: offset = N * slotH.
 
   useEffect(() => {
     if (userScrollingRef.current || activeTurnIdx < 0) return;
-    const y = turnLayoutsRef.current[activeTurnIdx];
-    if (y !== undefined) {
-      const offset = Math.max(0, y - scrollViewHeightRef.current * 0.35);
-      scrollViewRef.current?.scrollTo({ y: offset, animated: true });
-    }
-  }, [activeTurnIdx]);
+    // Far turns use FAR_H; prev turn uses slotH. Offset = sum of heights before active turn.
+    const offset = activeTurnIdx === 0 ? 0 : slotHRef.current + (activeTurnIdx - 1) * FAR_H;
+    scrollViewRef.current?.scrollTo({ y: offset, animated: true });
+  }, [activeTurnIdx, slotH]);
 
   // ── Fade animation on turn change ───────────────────────────────────────────
 
@@ -258,14 +265,20 @@ export default function PlayerScreen() {
           <View style={{ width: 44 }} />
         </View>
 
-        {/* ── Subtitle area: ScrollView with 3-slot visual ─────────────────── */}
+        {/* ── Subtitle area: scrollable with 3-slot visual ─────────────────── */}
         <View style={styles.subtitleArea}>
           <ScrollView
             ref={scrollViewRef}
             style={styles.subtitleScroll}
-            contentContainerStyle={styles.subtitleContent}
+            contentContainerStyle={{ paddingHorizontal: 28, paddingVertical: slotH }}
             showsVerticalScrollIndicator={false}
-            onLayout={(e) => { scrollViewHeightRef.current = e.nativeEvent.layout.height; }}
+            onLayout={(e) => {
+              const h = e.nativeEvent.layout.height;
+              scrollViewHeightRef.current = h;
+              const s = Math.round(h / 3);
+              setSlotH(s);
+              slotHRef.current = s;
+            }}
             onScrollBeginDrag={() => {
               userScrollingRef.current = true;
               if (userScrollTimerRef.current) clearTimeout(userScrollTimerRef.current);
@@ -281,36 +294,61 @@ export default function PlayerScreen() {
           >
             {dialogueTurns.map((turn, idx) => {
               const isActive = idx === activeTurnIdx;
+              const isPrev   = idx === activeTurnIdx - 1;
+              const isNext   = idx === activeTurnIdx + 1;
               return (
                 <Animated.View
                   key={idx}
-                  style={[styles.turnRow, isActive && { opacity: fadeAnim }]}
-                  onLayout={(e) => { turnLayoutsRef.current[idx] = e.nativeEvent.layout.y; }}
+                  style={[
+                    { height: (isActive || isPrev || isNext) ? slotH : FAR_H, justifyContent: 'center' },
+                    isActive && { opacity: fadeAnim },
+                  ]}
                 >
-                  {isActive
-                    ? (
-                      <View style={styles.currSlot}>
-                        <View style={styles.activeDot} />
-                        <Text style={styles.currText} numberOfLines={CURR_LINES}>{turn.text}</Text>
-                      </View>
-                    ) : (
-                      <Text style={styles.otherText} numberOfLines={2}>{turn.text}</Text>
-                    )
-                  }
+                  {isActive ? (
+                    <View style={styles.currSlot}>
+                      <View style={styles.activeDot} />
+                      <Text style={styles.currText} numberOfLines={CURR_LINES}>{turn.text}</Text>
+                    </View>
+                  ) : isPrev ? (
+                    <Text style={styles.prevText} numberOfLines={3}>{turn.text}</Text>
+                  ) : isNext ? (
+                    <Text style={styles.nextText} numberOfLines={3}>{turn.text}</Text>
+                  ) : (
+                    <Text style={styles.farText} numberOfLines={3}>{turn.text}</Text>
+                  )}
                 </Animated.View>
               );
             })}
           </ScrollView>
-          <LinearGradient colors={['rgba(13,17,23,1)', 'rgba(13,17,23,0)']} style={styles.fadeTop}    pointerEvents="none" />
-          <LinearGradient colors={['rgba(13,17,23,0)', 'rgba(13,17,23,1)']} style={styles.fadeBottom} pointerEvents="none" />
+          <LinearGradient colors={['rgba(13,17,23,1)', 'rgba(13,17,23,0)']} style={[styles.fadeTop,    { height: slotH * 0.6 }]} pointerEvents="none" />
+          <LinearGradient colors={['rgba(13,17,23,0)', 'rgba(13,17,23,1)']} style={[styles.fadeBottom, { height: slotH * 0.6 }]} pointerEvents="none" />
         </View>
 
         {/* ── Bottom controls ──────────────────────────────────────────────── */}
         <View style={styles.bottomPanel}>
 
-          <View style={styles.voiceRow}>
-            <Ionicons name="sparkles" size={11} color={Colors.brand.primary} />
-            <Text style={styles.voiceLabel}>AI Voice • Polaris</Text>
+          <View style={styles.metaRow}>
+            <View style={styles.voiceRow}>
+              <Ionicons name="sparkles" size={11} color={Colors.brand.primary} />
+              <Text style={styles.voiceLabel}>AI Voice • Polaris</Text>
+            </View>
+            <View style={styles.syncRow}>
+              <TouchableOpacity
+                onPress={() => setSyncOffset(v => Math.max(parseFloat((v - 0.5).toFixed(1)), -4))}
+                style={styles.syncBtn}
+                accessibilityLabel="字幕を遅らせる"
+              >
+                <Text style={styles.syncBtnText}>−</Text>
+              </TouchableOpacity>
+              <Text style={styles.syncValue}>{syncOffset > 0 ? '+' : ''}{syncOffset.toFixed(1)}s</Text>
+              <TouchableOpacity
+                onPress={() => setSyncOffset(v => Math.min(parseFloat((v + 0.5).toFixed(1)), 2))}
+                style={styles.syncBtn}
+                accessibilityLabel="字幕を早める"
+              >
+                <Text style={styles.syncBtnText}>＋</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Seekable progress bar */}
@@ -395,27 +433,31 @@ const styles = StyleSheet.create({
   navSub:    { fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: '500' },
 
   // Subtitle
-  subtitleArea:    { flex: 1, position: 'relative' },
-  subtitleScroll:  { flex: 1 },
-  subtitleContent: { paddingHorizontal: 28, paddingVertical: 140 },
+  subtitleArea:   { flex: 1, position: 'relative' },
+  subtitleScroll: { flex: 1 },
 
-  turnRow: { opacity: 0.28, marginBottom: 40 },
-
-  // Active turn — same layout as original currSlot
-  currSlot: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  // Active turn (middle slot)
+  currSlot:  { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   activeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.brand.primary, marginTop: 6, flexShrink: 0 },
   currText:  { flex: 1, fontSize: 22, fontWeight: '700', color: '#fff', lineHeight: CURR_LINE_H },
 
-  // Non-active turns
-  otherText: { fontSize: 17, color: '#fff', lineHeight: 26 },
+  // Adjacent turns (prev = top slot, next = bottom slot)
+  prevText: { fontSize: 15, color: 'rgba(255,255,255,0.35)', lineHeight: 23 },
+  nextText: { fontSize: 15, color: 'rgba(255,255,255,0.35)', lineHeight: 23 },
+  farText:  { fontSize: 13, color: 'rgba(255,255,255,0.35)', lineHeight: 20 },
 
-  fadeTop:    { position: 'absolute', top: 0,    left: 0, right: 0, height: 80 },
-  fadeBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 80 },
+  fadeTop:    { position: 'absolute', top: 0,    left: 0, right: 0 },
+  fadeBottom: { position: 'absolute', bottom: 0, left: 0, right: 0 },
 
   // Bottom panel
   bottomPanel: { paddingHorizontal: 20, paddingBottom: 8, gap: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' },
-  voiceRow:   { flexDirection: 'row', alignItems: 'center', gap: 5, paddingTop: 10 },
+  metaRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 10 },
+  voiceRow:   { flexDirection: 'row', alignItems: 'center', gap: 5 },
   voiceLabel: { fontSize: 11, color: Colors.brand.primary, fontWeight: '600' },
+  syncRow:    { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  syncBtn:    { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.10)', alignItems: 'center', justifyContent: 'center' },
+  syncBtnText:{ fontSize: 16, color: 'rgba(255,255,255,0.55)', lineHeight: 20 },
+  syncValue:  { fontSize: 11, color: 'rgba(255,255,255,0.40)', fontWeight: '600', minWidth: 36, textAlign: 'center' },
 
   // Seekable progress
   progressSection: { gap: 8 },

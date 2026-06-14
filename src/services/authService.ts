@@ -100,6 +100,16 @@ export const authService = {
     try { googleSignin()?.signOut(); } catch { /* ignore */ }
   },
 
+  async deleteAccount(): Promise<void> {
+    const user = auth.currentUser;
+    if (!user) throw new Error('No user signed in');
+    const { doc, deleteDoc } = await import('firebase/firestore');
+    const { db } = await import('@lib/firebase');
+    try { await deleteDoc(doc(db, 'users', user.uid)); } catch {}
+    await user.delete();
+    try { googleSignin()?.signOut(); } catch {}
+  },
+
   onAuthStateChange(callback: (user: User | null) => void) {
     return onAuthStateChanged(auth, callback);
   },

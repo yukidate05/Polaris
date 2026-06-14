@@ -2,8 +2,9 @@ import React, { useEffect, useCallback, useState, useRef } from 'react';
 import { useFocusEffect } from 'expo-router';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, ActivityIndicator, Dimensions,
+  StyleSheet, ActivityIndicator, Dimensions, AppState, Platform,
 } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,7 +17,12 @@ import { useBriefingStore, type BriefingStatus } from '@stores/briefingStore';
 import { useUserPreferencesStore } from '@stores/userPreferencesStore';
 import { googleDataService, MOCK_GOOGLE_DATA } from '@services/googleDataService';
 import { briefingService, fetchExternalToolData, type ExternalStats, type ExternalToolData } from '@services/briefingService';
+import { geminiTtsService } from '@services/geminiTtsService';
+import { googleTtsService } from '@services/googleTtsService';
 import { sessionService } from '@services/sessionService';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '@lib/firebase';
+import { getAuth } from 'firebase/auth';
 import { bgmService } from '@services/bgmService';
 import { useT } from '@/i18n';
 import Constants from 'expo-constants';
@@ -25,7 +31,7 @@ const { height: SCREEN_H } = Dimensions.get('window');
 const HERO_H = Math.round(SCREEN_H * 0.50);
 const isExpoGo = Constants.appOwnership === 'expo';
 const AUTO_BRIEFING = true;
-const SKIP_TTS      = false;
+const SKIP_TTS      = true  // audio is generated separately in Phase 2;
 
 
 function getGreetingKey(h: number) {
@@ -73,7 +79,7 @@ export default function HomeScreen() {
   const { selectedHostIds, preferences } = useUserPreferencesStore();
   const {
     status, googleData, script, hasPlayed,
-    setStatus, setGoogleData, setScript, setError, setHasPlayed,
+    setStatus, setGoogleData, setScript, updateAudioUri, setError, setHasPlayed,
   } = useBriefingStore();
 
   const firstName = profile?.displayName?.split(' ')[0]
@@ -156,7 +162,7 @@ export default function HomeScreen() {
         }
       }
 
-      // ── 3. スクリプト・音声生成 ───────────────────────────────────────
+      // ── 3. Phase 1: スクリプト生成（~60-80秒） ──────────────────────
       setStatus('generating_script');
       const prefs = useUserPreferencesStore.getState().preferences;
       const lang = prefs.language;
@@ -164,8 +170,40 @@ export default function HomeScreen() {
       const sc = await briefingService.generate(
         data, firstName, interests, hasPlayed, user?.uid ?? undefined, sessionData, selectedHostIds, userIsPro, lang, isMockData, externalDataRef.current, SKIP_TTS
       );
-      setScript(sc);
+      setScript(sc); // → status: 'ready'、音声なしでも再生可能な状態に
       if (user?.uid) subscriptionService.recordGeneration(user.uid);
+
+      // ── 4. Phase 2: 音声生成（~200秒）バックグラウンドで継続 ─────
+      if (!isMockData) {
+        setStatus('generating_audio');
+        const ttsStartTime = Date.now();
+        try {
+          const audioUri = await geminiTtsService.generateDialogueAudio(sc.dialogue, selectedHostIds ?? undefined);
+          updateAudioUri(audioUri);
+        } catch {
+          // Gemini TTS失敗 → Google TTSフォールバック
+          try {
+            const audioUri = await googleTtsService.generateDialogueAudio(sc.dialogue);
+            updateAudioUri(audioUri);
+          } catch {
+            // 両方失敗 → デバイスTTSで再生（audioUri: null のまま）
+            console.warn('[home] Both TTS services failed, falling back to device TTS');
+          }
+        }
+        setStatus('ready');
+
+        // バックグラウンド生成完了通知
+        if (AppState.currentState !== 'active') {
+          Notifications.scheduleNotificationAsync({
+            content: {
+              title: 'ブリーフィング完成',
+              body: '本日のDaily Briefが準備できました。今すぐ再生しましょう。',
+              ...(Platform.OS === 'android' ? { channelId: 'briefing' } : {}),
+            },
+            trigger: null,
+          }).catch(() => {});
+        }
+      }
     } catch (e: any) {
       bgmService.stop();
       const msg = e?.message ?? '';
@@ -208,6 +246,48 @@ export default function HomeScreen() {
         .catch(() => {});
     }, [user?.uid])
   );
+
+  useEffect(() => {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false,
+        shouldShowBanner: true, shouldShowList: true,
+      }),
+    });
+    const setup = async () => {
+      if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync('briefing', {
+          name: 'ブリーフィング完了',
+          importance: Notifications.AndroidImportance.HIGH,
+          vibrationPattern: [0, 250, 250, 250],
+          lightColor: '#6EE7B7',
+        });
+      }
+      await Notifications.requestPermissionsAsync();
+    };
+    setup().catch(() => {});
+  }, []);
+
+  // フォアグラウンド復帰時: generating_audio 中なら Firestore から TTS 結果を取得
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async (nextState) => {
+      if (nextState !== 'active') return;
+      const st = useBriefingStore.getState();
+      if (st.status !== 'generating_audio' || !st.script) return;
+      const uid = getAuth().currentUser?.uid;
+      if (!uid) return;
+      try {
+        const snap = await getDoc(doc(db, 'users', uid));
+        const d = snap.data();
+        const updatedAt: number = d?.ttsUpdatedAt?.toMillis?.() ?? 0;
+        if (d?.ttsAudioUrl && updatedAt > Date.now() - 15 * 60 * 1000) {
+          useBriefingStore.getState().updateAudioUri(d.ttsAudioUrl);
+          useBriefingStore.getState().setStatus('ready');
+        }
+      } catch {}
+    });
+    return () => sub.remove();
+  }, []);
 
   const generateBriefingRef = useRef(generateBriefing);
   useEffect(() => { generateBriefingRef.current = generateBriefing; });

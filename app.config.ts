@@ -24,7 +24,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   android: {
     package: 'com.yukid.polaris',
-    versionCode: 3,
+    versionCode: 16,
     googleServicesFile: './google-services.json',
     adaptiveIcon: {
       foregroundImage: './assets/adaptive-icon.png',
@@ -46,6 +46,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-font',
     'expo-secure-store',
     'expo-audio',
+    'expo-notifications',
     [
       '@react-native-google-signin/google-signin',
       {
