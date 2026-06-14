@@ -123,10 +123,16 @@ export const gemini = onRequest(
 
     const data = await response.json() as { candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[]; promptFeedback?: unknown };
     const parts = data.candidates?.[0]?.content?.parts ?? [];
-    // Gemini 2.5 Flash returns thinking tokens (thought: true) before the actual response
-    const text = parts.find(p => !p.thought)?.text ?? parts[0]?.text ?? '';
+
+    // Gemini 2.5 Flash: thought=true のパーツは思考トークン、thought=false/undefined が実際のレスポンス
+    // thought フラグがない場合やすべて thought=true の場合は、"chapters" キーを含むパーツを優先
+    const responsePartWithJson = parts.find(p => !p.thought && p.text?.includes('"chapters"'));
+    const responsePartAny      = parts.find(p => !p.thought && p.text);
+    const text = responsePartWithJson?.text ?? responsePartAny?.text ?? parts[0]?.text ?? '';
+
     // Always log response shape for diagnostics
-    console.log(`[gemini] parts=${parts.length} textLen=${text.length} preview=${text.slice(0, 80).replace(/\n/g, ' ')}`);
+    const thoughtParts = parts.filter(p => p.thought).length;
+    console.log(`[gemini] parts=${parts.length} thought=${thoughtParts} textLen=${text.length} hasChapters=${text.includes('"chapters"')} preview=${text.slice(0, 80).replace(/\n/g, ' ')}`);
     if (!text || text.length < 100) {
       console.error('[gemini] suspicious response - parts:', JSON.stringify(parts).slice(0, 500), 'promptFeedback:', JSON.stringify(data.promptFeedback));
     }

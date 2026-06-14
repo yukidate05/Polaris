@@ -45,22 +45,46 @@ async function callGemini(prompt: string, systemPrompt: string, useSearch = fals
 }
 
 
+function extractJsonFromText(text: string): string | null {
+  // 1. テキスト全体がそのままJSONの場合（クリーンなレスポンス）
+  try { JSON.parse(text); return text; } catch {}
+
+  // 2. Gemini 2.5 Flash の thinking モードで思考トークンが混入する場合:
+  //    実際のJSONは末尾にある。末尾から逆走して最後の完全なJSONオブジェクトを抽出。
+  let depth = 0, end = -1, start = -1;
+  for (let i = text.length - 1; i >= 0; i--) {
+    const c = text[i];
+    if (c === '}') { if (end === -1) end = i; depth++; }
+    else if (c === '{') { depth--; if (depth === 0) { start = i; break; } }
+  }
+  if (start !== -1 && end !== -1) return text.slice(start, end + 1);
+
+  return null;
+}
+
 function parseChapters(text: string): ChapterDraft[] {
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) {
-    console.warn('[parseChapters] no JSON found. preview:', text.slice(0, 200));
+  const jsonStr = extractJsonFromText(text);
+  if (!jsonStr) {
+    console.warn('[parseChapters] no JSON found. textLen:', text.length, 'preview:', text.slice(0, 200));
     throw new Error('gemini_parse');
   }
 
-  const parsed = JSON.parse(match[0]);
-  const chapters = parsed.chapters ?? parsed.briefing?.chapters ?? parsed.script?.chapters;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch (e) {
+    console.warn('[parseChapters] JSON.parse failed. jsonLen:', jsonStr.length, 'preview:', jsonStr.slice(0, 200));
+    throw new Error('gemini_parse_json');
+  }
+
+  const chapters = (parsed.chapters ?? (parsed as any).briefing?.chapters ?? (parsed as any).script?.chapters) as unknown[];
   if (!Array.isArray(chapters)) {
-    console.warn('[parseChapters] chapters missing. keys:', Object.keys(parsed), 'preview:', text.slice(0, 200));
+    console.warn('[parseChapters] chapters missing. keys:', Object.keys(parsed), 'preview:', jsonStr.slice(0, 200));
     throw new Error('gemini_parse_no_chapters');
   }
-  return chapters.map((c: { id: string; title: string; iconName: string; dialogue?: DialogueTurn[] }) => ({
+  return chapters.map((c: any) => ({
     ...c,
-    text: (c.dialogue ?? []).map((t) => t.text).join('　'),
+    text: ((c.dialogue ?? []) as DialogueTurn[]).map((t) => t.text).join('　'),
   }));
 }
 
