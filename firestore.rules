@@ -7,7 +7,7 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow create: if request.auth != null && request.auth.uid == userId
-        && !('plan' in request.resource.data);
+        && (!('plan' in request.resource.data) || request.resource.data.plan == 'free');
       allow update: if request.auth != null && request.auth.uid == userId
         && !('plan' in request.resource.data.diff(resource.data).affectedKeys());
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useCallback, useState, useRef } from 'react';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useFocusEffect } from 'expo-router';
 import {
   View, Text, ScrollView, TouchableOpacity,
@@ -92,6 +93,14 @@ export default function HomeScreen() {
   const dateStr  = formatDate(preferences.language);
 
   const isGenerating = ['fetching', 'generating_script', 'generating_audio'].includes(status);
+
+  useEffect(() => {
+    if (isGenerating) {
+      activateKeepAwakeAsync();
+    } else {
+      deactivateKeepAwake();
+    }
+  }, [isGenerating]);
   const activeTab = 'foryou';
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [paywallStatus,  setPaywallStatus]  = useState<AccessStatus | null>(null);
