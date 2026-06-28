@@ -14,10 +14,10 @@ import { AuroraBackground, PaywallModal, SubscriptionStatusBanner, ChatworkIcon 
 import { useAuthStore } from '@stores/authStore';
 import { subscriptionService, type AccessStatus } from '@services/subscriptionService';
 import { checkIsPro, getOfferings, purchasePackage } from '@lib/revenuecat';
-import { useBriefingStore, type BriefingStatus } from '@stores/briefingStore';
+import { useBriefingStore, type BriefingStatus, type NewsSegment } from '@stores/briefingStore';
 import { useUserPreferencesStore } from '@stores/userPreferencesStore';
 import { googleDataService, MOCK_GOOGLE_DATA } from '@services/googleDataService';
-import { briefingService, fetchExternalToolData, type ExternalStats, type ExternalToolData } from '@services/briefingService';
+import { briefingService, fetchExternalToolData, generateNewsSegment, type NewsSegmentData, type ExternalStats, type ExternalToolData } from '@services/briefingService';
 import { geminiTtsService } from '@services/geminiTtsService';
 import { googleTtsService } from '@services/googleTtsService';
 import { sessionService } from '@services/sessionService';
@@ -79,9 +79,12 @@ export default function HomeScreen() {
   const { user, profile, googleAccessToken, googleTokenResolved } = useAuthStore();
   const { selectedHostIds, preferences } = useUserPreferencesStore();
   const {
-    status, googleData, script, hasPlayed,
+    status, googleData, script, hasPlayed, error,
     setStatus, setGoogleData, setScript, updateAudioUri, setError, setHasPlayed,
+    setNewsStatus, setNewsSegment, setNewsAudioUri, setTransitionAudioUri, clearNews,
   } = useBriefingStore();
+
+  const newsTextPromiseRef = useRef<Promise<NewsSegmentData | null> | null>(null);
 
   const firstName = profile?.displayName?.split(' ')[0]
     ?? user?.displayName?.split(' ')[0]
@@ -130,6 +133,8 @@ export default function HomeScreen() {
     if (isGenerating) return;
 
     // ── 1. Googleデータを取得 ──────────────────────────────────────────
+    newsTextPromiseRef.current = null;
+    clearNews(); // 前回のニュース状態をクリア（再生成時に旧音声へジャンプするのを防ぐ）
     setStatus('fetching');
     let data = googleData;
     try {
@@ -176,30 +181,84 @@ export default function HomeScreen() {
       const prefs = useUserPreferencesStore.getState().preferences;
       const lang = prefs.language;
       const interests = prefs.topicsOfInterest ?? [];
+      let chatworkMyName: string | undefined;
+      let notionMyName: string | undefined;
+      if (user?.uid) {
+        const userSnap = await getDoc(doc(db, 'users', user.uid));
+        chatworkMyName = userSnap.data()?.chatworkName as string | undefined;
+        notionMyName = userSnap.data()?.notionMyName as string | undefined;
+      }
       const sc = await briefingService.generate(
-        data, firstName, interests, hasPlayed, user?.uid ?? undefined, sessionData, selectedHostIds, userIsPro, lang, isMockData, externalDataRef.current, SKIP_TTS
+        data, firstName, interests, hasPlayed, user?.uid ?? undefined, sessionData, selectedHostIds, userIsPro, lang, isMockData, externalDataRef.current, SKIP_TTS, true, chatworkMyName, notionMyName
       );
       setScript(sc); // → status: 'ready'、音声なしでも再生可能な状態に
       if (user?.uid) subscriptionService.recordGeneration(user.uid);
 
-      // ── 4. Phase 2: 音声生成（~200秒）バックグラウンドで継続 ─────
+      // ── 4a. Proの場合: ニューステキスト生成をすぐバックグラウンドで開始（TTS前）──
+      if (userIsPro && !isMockData && user?.uid) {
+        const targetMinutes = Math.max(5, Math.round((600 - sc.estimatedSeconds) / 60));
+        setNewsStatus('generating');
+        newsTextPromiseRef.current = generateNewsSegment({
+          uid:           user.uid,
+          userName:      firstName,
+          interests:     prefs.topicsOfInterest ?? [],
+          targetMinutes,
+          hostIds:       selectedHostIds ?? undefined,
+          language:      lang,
+          topEmails:     data.topEmails,
+        }).catch(e => { console.error('[home] news text gen failed:', e); return null; });
+      }
+
+      // ── 4b. Phase 2: ブリーフィング音声生成（~200秒）─────────────
       if (!isMockData) {
         setStatus('generating_audio');
-        const ttsStartTime = Date.now();
         try {
           const audioUri = await geminiTtsService.generateDialogueAudio(sc.dialogue, selectedHostIds ?? undefined);
           updateAudioUri(audioUri);
         } catch {
-          // Gemini TTS失敗 → Google TTSフォールバック
           try {
             const audioUri = await googleTtsService.generateDialogueAudio(sc.dialogue);
             updateAudioUri(audioUri);
           } catch {
-            // 両方失敗 → デバイスTTSで再生（audioUri: null のまま）
             console.warn('[home] Both TTS services failed, falling back to device TTS');
           }
         }
         setStatus('ready');
+
+        // ── 4c. ブリーフィングTTS完了後 → ニュースTTS生成（直列）──
+        if (userIsPro && newsTextPromiseRef.current && user?.uid) {
+          const newsText = await newsTextPromiseRef.current;
+          if (newsText) {
+            setNewsSegment({
+              chapters: newsText.chapters,
+              dialogue: newsText.dialogue,
+              estimatedSeconds: newsText.estimatedSeconds,
+              interestText: newsText.interestText,
+              audioUri: null,
+            });
+
+            // 遷移アナウンス（Google TTS ~5s）→ 即セット（ブリーフィング終了後すぐ再生できるよう）
+            const transitionText = lang === 'ja'
+              ? `この後は${firstName}さんの興味のある${newsText.interestText}についてのニュースをお届けします！`
+              : `Coming up next — the latest news on ${newsText.interestText}, just for you, ${firstName}!`;
+            const transUri = await googleTtsService.generateAudio(transitionText).catch(() => null);
+            setTransitionAudioUri(transUri);
+
+            // ニュースTTS（~3min）→ バックグラウンドで生成、完了次第セット（ブリーフィング再生中に完了する想定）
+            geminiTtsService.generateDialogueAudio(newsText.dialogue, selectedHostIds ?? undefined)
+              .catch(async () => googleTtsService.generateDialogueAudio(newsText.dialogue).catch(() => null))
+              .then(newsUri => {
+                if (newsUri) {
+                  setNewsAudioUri(newsUri);
+                  setNewsStatus('ready');
+                } else {
+                  setNewsStatus('error');
+                }
+              });
+          } else {
+            setNewsStatus('error');
+          }
+        }
 
         // バックグラウンド生成完了通知
         if (AppState.currentState !== 'active') {
@@ -425,6 +484,20 @@ export default function HomeScreen() {
             </View>
           )}
 
+          {/* Error banner */}
+          {status === 'error' && (
+            <View style={s.errorBanner}>
+              <Ionicons name="alert-circle-outline" size={20} color="#FF6464" />
+              <View style={{ flex: 1 }}>
+                <Text style={s.errorTitle}>生成に失敗しました</Text>
+                {error ? <Text style={s.errorSub} selectable>{error.slice(0, 200)}</Text> : null}
+              </View>
+              <TouchableOpacity onPress={generateBriefing} style={s.retryBtn}>
+                <Text style={s.retryBtnText}>再試行</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* Play button */}
           {status !== 'quota_exceeded' && (
             <TouchableOpacity
@@ -629,14 +702,14 @@ export default function HomeScreen() {
               })()}
 
               {/* Notion */}
-              {localExternalData?.notionPages && localExternalData.notionPages.length > 0 && (
+              {localExternalData?.notionPages && localExternalData.notionPages.filter(p => new Date(p.lastEdited).toDateString() === new Date().toDateString()).length > 0 && (
                 <View style={s.section}>
                   <View style={s.sectionLabelRow}>
                     <Ionicons name="document-text-outline" size={12} color="rgba(255,255,255,0.42)" />
                     <Text style={s.sectionLabel}>NOTION</Text>
                   </View>
                   <View style={s.listCard}>
-                    {localExternalData.notionPages.slice(0, 4).map((page, i) => (
+                    {localExternalData.notionPages.filter(p => new Date(p.lastEdited).toDateString() === new Date().toDateString()).slice(0, 4).map((page, i) => (
                       <View key={i} style={[s.emailRow, i > 0 && s.rowBorder]}>
                         <View style={s.emailDot} />
                         <View style={{ flex: 1 }}>
@@ -719,6 +792,18 @@ const s = StyleSheet.create({
   },
   quotaTitle: { fontSize: 14, fontWeight: '700', color: '#F4A24A', marginBottom: 4 },
   quotaSub:   { fontSize: 12, color: 'rgba(255,255,255,0.55)', lineHeight: 17 },
+
+  // Error banner
+  errorBanner: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+    backgroundColor: 'rgba(255,100,100,0.12)',
+    borderWidth: 1, borderColor: 'rgba(255,100,100,0.30)',
+    borderRadius: 16, padding: 16,
+  },
+  errorTitle: { fontSize: 14, fontWeight: '700', color: '#FF6464', marginBottom: 4 },
+  errorSub:   { fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 16 },
+  retryBtn:   { backgroundColor: 'rgba(255,100,100,0.25)', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
+  retryBtnText: { fontSize: 12, fontWeight: '600', color: '#FF6464' },
 
   // Play button
   playBtn: {

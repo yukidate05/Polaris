@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, Animated, PanResponder, Dimensions,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, Animated, PanResponder, Dimensions, AppState,
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -9,6 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { AuroraBackground } from '@components/ui';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer, type AudioStatus } from 'expo-audio';
 import { useBriefingStore } from '@stores/briefingStore';
+import type { NewsSegment } from '@stores/briefingStore';
 import { useAuthStore } from '@stores/authStore';
 import { speechService, SPEECH_RATES, type SpeechRate } from '@services/speechService';
 import { sessionService } from '@services/sessionService';
@@ -31,30 +32,76 @@ function chapterAtTime(chapters: BriefingChapter[], sec: number): BriefingChapte
   return active;
 }
 
-export default function PlayerScreen() {
-  const { script } = useBriefingStore();
-  const { user }   = useAuthStore();
+type PlayPhase = 'briefing' | 'transition' | 'news';
 
+export default function PlayerScreen() {
+  const { script, newsSegment, transitionAudioUri, newsStatus } = useBriefingStore();
+  const { user } = useAuthStore();
+
+  const [playPhase,   setPlayPhase]   = useState<PlayPhase>('briefing');
   const [isPlaying,   setIsPlaying]   = useState(false);
   const [currentSec,  setCurrentSec]  = useState(0);
   const [totalSec,    setTotalSec]    = useState(script?.estimatedSeconds ?? 0);
   const [rate,        setRate]        = useState(1.0);
-  const [syncOffset,  setSyncOffset]  = useState(-1.0); // subtitle lag vs audio (seconds)
+  const [syncOffset,  setSyncOffset]  = useState(-1.0);
 
   const playerRef     = useRef<AudioPlayer | null>(null);
   const timerRef      = useRef<ReturnType<typeof setInterval> | null>(null);
   const seekOffsetRef = useRef<number>(0);
   const startTimeRef  = useRef<number>(Date.now());
   const rateRef       = useRef<number>(1.0);
-  const isAudio       = !!script?.audioUri;
+  const lastSeekRef   = useRef<number>(0);
+  const isPlayingRef  = useRef<boolean>(false);
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+  const playPhaseRef          = useRef<PlayPhase>('briefing');
+  const transitionAudioUriRef = useRef<string | null>(null);
+  const newsAudioUriRef       = useRef<string | null>(null);
+  const completedNaturallyRef = useRef(false); // 自然に最後まで再生されたか（cleanup時のcompletionRate=1.0用）
+  useEffect(() => { playPhaseRef.current = playPhase; }, [playPhase]);
+  useEffect(() => { transitionAudioUriRef.current = transitionAudioUri ?? null; }, [transitionAudioUri]);
+  useEffect(() => { newsAudioUriRef.current = newsSegment?.audioUri ?? null; }, [newsSegment?.audioUri]);
+
+  // 遷移アナウンスが実際に再生開始されたかを追跡（ニュースへの早期スキップ防止）
+  const transitionHasPlayedRef = useRef(false);
+  useEffect(() => {
+    if (playPhase === 'transition' && isPlaying) transitionHasPlayedRef.current = true;
+    if (playPhase !== 'transition') transitionHasPlayedRef.current = false;
+  }, [playPhase, isPlaying]);
+
+  // 遷移アナウンス終了後にニュースTTSが遅れて届いた場合、ニュースフェーズへ進む
+  useEffect(() => {
+    if (playPhase === 'transition' && !isPlaying && transitionHasPlayedRef.current && newsSegment?.audioUri) {
+      setPlayPhase('news');
+    }
+  }, [playPhase, isPlaying, newsSegment?.audioUri]);
+
+  // バックグラウンドから戻った時、オーディオが外部割り込みで止まっていたら再開（Problem 3対策）
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active') return;
+      const p = playerRef.current;
+      if (!p) return;
+      // isPlayingRef が true（再生中のはず）なのに止まっている場合のみ再開。
+      // ユーザーが意図的にポーズした場合（isPlayingRef=false）は再開しない。
+      try {
+        if (isPlayingRef.current && !p.playing) p.play();
+      } catch {}
+    });
+    return () => sub.remove();
+  }, []);
+
+  // フェーズごとの音声URI・データ
+  const currentAudioUri = playPhase === 'briefing' ? script?.audioUri
+    : playPhase === 'transition' ? transitionAudioUri
+    : newsSegment?.audioUri;
+  const isAudio = !!currentAudioUri;
 
   // refs for PanResponder (stale closure対策)
-  const totalSecRef      = useRef(totalSec);
-  const isAudioRef       = useRef(isAudio);
-  const trackWidthRef    = useRef(0);
+  const totalSecRef   = useRef(totalSec);
+  const isAudioRef    = useRef(isAudio);
+  const trackWidthRef = useRef(0);
   useEffect(() => { totalSecRef.current = totalSec; }, [totalSec]);
   useEffect(() => { isAudioRef.current  = isAudio;  }, [isAudio]);
-
 
   // subtitle scroll
   const scrollViewRef       = useRef<ScrollView>(null);
@@ -62,18 +109,20 @@ export default function PlayerScreen() {
   const userScrollingRef    = useRef(false);
   const userScrollTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // slot height — measured from actual ScrollView layout (1/3 of visible area)
+  // slot height
   const [slotH, setSlotH] = useState(Math.round((Dimensions.get('window').height - 280) / 3));
   const slotHRef = useRef(slotH);
   useEffect(() => { slotHRef.current = slotH; }, [slotH]);
 
-  const progress      = totalSec > 0 ? currentSec / totalSec : 0;
-  const activeChapter = script ? chapterAtTime(script.chapters, currentSec) : null;
+  // フェーズごとのチャプター・ダイアログ
+  const activeChapters = playPhase === 'news' ? (newsSegment?.chapters ?? []) : (script?.chapters ?? []);
+  const progress       = totalSec > 0 ? currentSec / totalSec : 0;
+  const activeChapter  = chapterAtTime(activeChapters, currentSec);
 
   // ── Dialogue turns ──────────────────────────────────────────────────────────
 
   const dialogueTurns = useMemo(() => {
-    const turns = script?.dialogue;
+    const turns = playPhase === 'news' ? newsSegment?.dialogue : script?.dialogue;
     if (!turns?.length || totalSec === 0) return [];
     const total = turns.reduce((s, t) => s + t.text.length, 0);
     let cum = 0;
@@ -82,7 +131,7 @@ export default function PlayerScreen() {
       cum += t.text.length;
       return { ...t, startSec };
     });
-  }, [script?.dialogue, totalSec]);
+  }, [playPhase, script?.dialogue, newsSegment?.dialogue, totalSec]);
 
   const activeTurnIdx = useMemo(() => {
     if (!dialogueTurns.length) return -1;
@@ -126,7 +175,12 @@ export default function PlayerScreen() {
     const clamped = Math.max(0, Math.min(sec, totalSecRef.current));
     setCurrentSec(clamped);
     if (isAudioRef.current && playerRef.current) {
-      try { await playerRef.current.seekTo(clamped); } catch {}
+      const wasPlaying = isPlayingRef.current;
+      lastSeekRef.current = Date.now();
+      try {
+        await playerRef.current.seekTo(clamped);
+        if (wasPlaying) playerRef.current.play();
+      } catch (e) { console.warn('[player] seekTo failed:', e); }
     } else {
       seekOffsetRef.current = clamped;
       startTimeRef.current  = Date.now();
@@ -153,30 +207,80 @@ export default function PlayerScreen() {
     })
   ).current;
 
-  // ── Audio setup ──────────────────────────────────────────────────────────────
+  // ── Audio setup（フェーズ変化時に再セットアップ）──────────────────────────
 
   useEffect(() => {
     if (!script) return;
     let cancelled = false;
-    if (isAudio) {
-      setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: true }).then(() => {
+
+    // 前のプレイヤーを破棄
+    if (playerRef.current) {
+      playerRef.current.pause();
+      playerRef.current.remove();
+      playerRef.current = null;
+    }
+    clearInterval(timerRef.current!);
+    setCurrentSec(0);
+
+    if (currentAudioUri) {
+      setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: true, interruptionMode: 'duckOthers' })
+        .catch(() => {})
+        .then(() => {
         if (cancelled) return;
-        const p = createAudioPlayer({ uri: script.audioUri! }, { updateInterval: 100 });
+        try {
+        const p = createAudioPlayer({ uri: currentAudioUri }, { updateInterval: 100 });
         playerRef.current = p;
         p.addListener('playbackStatusUpdate', (status: AudioStatus) => {
-          setCurrentSec(status.currentTime ?? 0);
+          // Ignore currentTime updates for 800ms after a seek to prevent snap-back
+          if (Date.now() - lastSeekRef.current > 800) {
+            setCurrentSec(status.currentTime ?? 0);
+          }
           if (status.duration) setTotalSec(status.duration);
           setIsPlaying(status.playing);
-          if (status.didJustFinish) { setIsPlaying(false); setCurrentSec(0); }
+          if (status.didJustFinish) {
+            const phase      = playPhaseRef.current;
+            const transUri   = transitionAudioUriRef.current;
+            const newsUri    = newsAudioUriRef.current;
+            if (phase === 'briefing' && transUri) {
+              setPlayPhase('transition');
+            } else if (phase === 'briefing' && newsUri) {
+              setPlayPhase('news');
+            } else if (phase === 'transition' && newsUri) {
+              setPlayPhase('news');
+            } else {
+              // 全フェーズ終了。プレイヤーを破棄せず先頭にシーク（画面上でそのまま再再生可能にする）
+              completedNaturallyRef.current = true;
+              setIsPlaying(false);
+              setCurrentSec(totalSecRef.current);
+              if (playerRef.current) { playerRef.current.seekTo(0).catch(() => {}); }
+            }
+          }
         });
         p.play();
         setIsPlaying(true);
+        } catch (e) {
+          console.error('[player] audio setup failed:', e);
+          if (playPhase === 'briefing') startSpeech();
+        }
       });
-    } else {
+    } else if (playPhase === 'briefing') {
       startSpeech();
+    } else if (playPhase === 'transition') {
+      // transition TTS failed — skip directly to news
+      const newsUri = newsAudioUriRef.current;
+      if (newsUri) setTimeout(() => setPlayPhase('news'), 300);
+      else setIsPlaying(false);
     }
-    return () => { cancelled = true; cleanup(); };
-  }, []);
+
+    return () => {
+      cancelled = true;
+      if (playPhase === 'briefing') cleanup();
+      else {
+        if (playerRef.current) { playerRef.current.pause(); playerRef.current.remove(); playerRef.current = null; }
+        clearInterval(timerRef.current!);
+      }
+    };
+  }, [playPhase]);
 
   async function startSpeech(fromSec = 0) {
     if (!script) return;
@@ -205,7 +309,7 @@ export default function PlayerScreen() {
       sessionService.saveProgress(user.uid, {
         chapterTitle:   activeChapter?.title ?? script.chapters[0]?.title ?? '',
         chapterIndex:   Math.max(0, chapterIdx),
-        completionRate: Math.min(1, currentSec / totalSec),
+        completionRate: completedNaturallyRef.current ? 1.0 : Math.min(1, currentSec / totalSec),
         topicSummary,
       });
     }
@@ -265,8 +369,18 @@ export default function PlayerScreen() {
           <View style={{ width: 44 }} />
         </View>
 
+        {/* ── Transition overlay（ニュースキャスト開始前アナウンス中）─────── */}
+        {playPhase === 'transition' && (
+          <View style={styles.transitionOverlay}>
+            <Text style={styles.transitionText}>
+              {newsSegment?.interestText ? `${newsSegment.interestText}\nニュースキャスト` : 'ニュースキャスト'}
+            </Text>
+            <Text style={styles.transitionSub}>準備中...</Text>
+          </View>
+        )}
+
         {/* ── Subtitle area: scrollable with 3-slot visual ─────────────────── */}
-        <View style={styles.subtitleArea}>
+        {playPhase !== 'transition' && <View style={styles.subtitleArea}>
           <ScrollView
             ref={scrollViewRef}
             style={styles.subtitleScroll}
@@ -322,7 +436,7 @@ export default function PlayerScreen() {
           </ScrollView>
           <LinearGradient colors={['rgba(13,17,23,1)', 'rgba(13,17,23,0)']} style={[styles.fadeTop,    { height: slotH * 0.6 }]} pointerEvents="none" />
           <LinearGradient colors={['rgba(13,17,23,0)', 'rgba(13,17,23,1)']} style={[styles.fadeBottom, { height: slotH * 0.6 }]} pointerEvents="none" />
-        </View>
+        </View>}
 
         {/* ── Bottom controls ──────────────────────────────────────────────── */}
         <View style={styles.bottomPanel}>
@@ -370,7 +484,7 @@ export default function PlayerScreen() {
           {/* Chapter chips */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View style={styles.chapRow}>
-              {script.chapters.map((ch) => {
+              {activeChapters.map((ch) => {
                 const active = activeChapter?.id === ch.id;
                 return (
                   <TouchableOpacity
@@ -387,27 +501,44 @@ export default function PlayerScreen() {
             </View>
           </ScrollView>
 
-          {/* Playback controls */}
+          {/* Playback controls (transition中は下の専用コントロールを使う) */}
+          {playPhase !== 'transition' && (
+            <View style={styles.controls}>
+              <TouchableOpacity onPress={cycleRate} style={styles.sideControl} accessibilityLabel={`再生速度 ${rate}倍`}>
+                <Text style={styles.rateText}>{rate}x</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => handleSkip(-15)} style={styles.skipBtn} accessibilityLabel="15秒戻す">
+                <Ionicons name="play-back" size={20} color="rgba(255,255,255,0.6)" />
+                <Text style={styles.skipLabel}>15</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handlePlayPause} style={styles.playBtn} activeOpacity={0.85} accessibilityLabel={isPlaying ? '一時停止' : '再生'}>
+                <Ionicons name={isPlaying ? 'pause' : 'play'} size={30} color="#0A0A0A"
+                  style={!isPlaying ? { marginLeft: 4 } : undefined} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => handleSkip(15)} style={styles.skipBtn} accessibilityLabel="15秒進む">
+                <Ionicons name="play-forward" size={20} color="rgba(255,255,255,0.6)" />
+                <Text style={styles.skipLabel}>15</Text>
+              </TouchableOpacity>
+              <View style={styles.sideControl} />
+            </View>
+          )}
+
+        </View>
+
+        {/* transition フェーズ中もコントロールを表示 */}
+        {playPhase === 'transition' && (
           <View style={styles.controls}>
-            <TouchableOpacity onPress={cycleRate} style={styles.sideControl} accessibilityLabel={`再生速度 ${rate}倍`}>
-              <Text style={styles.rateText}>{rate}x</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => handleSkip(-15)} style={styles.skipBtn} accessibilityLabel="15秒戻す">
-              <Ionicons name="play-back" size={20} color="rgba(255,255,255,0.6)" />
-              <Text style={styles.skipLabel}>15</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={handlePlayPause} style={styles.playBtn} activeOpacity={0.85} accessibilityLabel={isPlaying ? '一時停止' : '再生'}>
+            <View style={styles.sideControl} />
+            <View style={styles.skipBtn} />
+            <TouchableOpacity onPress={handlePlayPause} style={styles.playBtn} activeOpacity={0.85}>
               <Ionicons name={isPlaying ? 'pause' : 'play'} size={30} color="#0A0A0A"
                 style={!isPlaying ? { marginLeft: 4 } : undefined} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => handleSkip(15)} style={styles.skipBtn} accessibilityLabel="15秒進む">
-              <Ionicons name="play-forward" size={20} color="rgba(255,255,255,0.6)" />
-              <Text style={styles.skipLabel}>15</Text>
-            </TouchableOpacity>
+            <View style={styles.skipBtn} />
             <View style={styles.sideControl} />
           </View>
+        )}
 
-        </View>
       </SafeAreaView>
     </View>
   );
@@ -416,6 +547,9 @@ export default function PlayerScreen() {
 const styles = StyleSheet.create({
   bg:   { flex: 1, backgroundColor: '#0D1117' },
   safe: { flex: 1 },
+  transitionOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
+  transitionText:    { fontSize: 22, fontWeight: '700', color: '#fff', textAlign: 'center', lineHeight: 32 },
+  transitionSub:     { fontSize: 14, color: 'rgba(255,255,255,0.5)', marginTop: 12 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 },
   emptyText:    { fontSize: 15, color: 'rgba(255,255,255,0.6)', textAlign: 'center' },
   emptyBtn:     { backgroundColor: Colors.brand.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 20 },

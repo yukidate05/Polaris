@@ -78,11 +78,11 @@ export interface PlayerState {
 // ─── User Preferences ─────────────────────────────────────────────────────────
 
 export interface UserPreferences {
-  briefingTime:    string;   // HH:MM
-  language:        string;   // ja, en, etc.
-  voiceStyle:      string;
+  briefingTime:        string;   // HH:MM
+  language:            string;   // ja, en, etc.
+  voiceStyle:          string;
   notificationsEnabled: boolean;
-  topicsOfInterest: string[];
+  topicsOfInterest:    string[];
 }
 
 // ─── Notification ─────────────────────────────────────────────────────────────

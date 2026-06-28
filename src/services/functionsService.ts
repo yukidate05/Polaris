@@ -37,7 +37,12 @@ export async function callFunction<T>(
       throw new Error(`[${name}] ${res.status}: ${err}`);
     }
 
-    return res.json() as Promise<T>;
+    const text = await res.text();
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new Error(`[${name}] invalid JSON response: ${text.slice(0, 200)}`);
+    }
   } finally {
     if (timerId !== undefined) clearTimeout(timerId);
   }

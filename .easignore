@@ -1,0 +1,6 @@
+# Large files not needed for build
+*.aab
+*.apk
+docs/
+img/
+upload_aab.mjs

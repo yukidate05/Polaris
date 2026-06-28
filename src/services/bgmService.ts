@@ -62,9 +62,10 @@ async function play(): Promise<void> {
 }
 
 async function fadeOutAndStop(): Promise<void> {
+  _session++; // 進行中の play() をキャンセル（BGMプレイヤー生成中の競合を防ぐ）
   const p = _player;
-  if (!p) return;
   _player = null;
+  if (!p) return;
 
   const stepInterval = FADE_DURATION_MS / FADE_STEPS;
   for (let i = FADE_STEPS - 1; i >= 0; i--) {

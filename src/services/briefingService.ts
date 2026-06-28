@@ -103,24 +103,26 @@ function splitTurns(turns: import('./claudeService').DialogueTurn[], maxLen = 80
 
 const todayDate = () => new Date().toISOString().slice(0, 10);
 
-async function getCachedNews(uid: string, language: string): Promise<ChapterDraft[] | null> {
+async function getCachedNews(uid: string, language: string, minTargetMinutes?: number): Promise<ChapterDraft[] | null> {
   try {
     const snap = await getDoc(doc(db, 'users', uid, 'cache', 'dailyNews'));
     if (!snap.exists()) return null;
     const d = snap.data();
     if (d.date !== todayDate() || d.language !== language) return null;
+    if (minTargetMinutes && (d.targetMinutes ?? 0) < minTargetMinutes) return null;
     return d.chapters as ChapterDraft[];
   } catch {
     return null;
   }
 }
 
-async function cacheNews(uid: string, language: string, chapters: ChapterDraft[]): Promise<void> {
+async function cacheNews(uid: string, language: string, chapters: ChapterDraft[], targetMinutes?: number): Promise<void> {
   try {
     await setDoc(doc(db, 'users', uid, 'cache', 'dailyNews'), {
       date: todayDate(),
       language,
       chapters,
+      targetMinutes: targetMinutes ?? 5,
       cachedAt: serverTimestamp(),
     });
   } catch {
@@ -128,17 +130,6 @@ async function cacheNews(uid: string, language: string, chapters: ChapterDraft[]
   }
 }
 
-function todayString(): string {
-  const now  = new Date();
-  const days = ['日曜日', '月曜日', '火曜日', '水曜日', '木曜日', '金曜日', '土曜日'];
-  return `${now.getMonth() + 1}月${now.getDate()}日、${days[now.getDay()]}`;
-}
-
-function greeting(hour: number): string {
-  if (hour < 12) return 'おはようございます';
-  if (hour < 17) return 'こんにちは';
-  return 'こんばんは';
-}
 
 function estimateChapterTimes(texts: string[], totalSec: number): number[] {
   const total  = texts.reduce((s, t) => s + t.length, 0);
@@ -150,51 +141,58 @@ function estimateChapterTimes(texts: string[], totalSec: number): number[] {
   });
 }
 
-function templateChapters(data: GoogleData, userName: string): ChapterDraft[] {
-  const g  = greeting(new Date().getHours());
-  const dt = todayString();
-  const d  = (text: string) => [{ speaker: 'A' as const, text }];
 
-  const topMindText = data.unreadCount === 0
-    ? `${g}、${userName}さん。今日は${dt}です。未読メールはありません。今日も集中して取り組みましょう。`
-    : (() => {
-        let t = `${g}、${userName}さん。今日は${dt}です。未読メールが${data.unreadCount}件あります。`;
-        data.topEmails.slice(0, 2).forEach(e => { t += `${e.from}さんからの「${e.subject}」は要確認です。`; });
-        return t;
-      })();
+export interface NewsSegmentData {
+  chapters:         BriefingChapter[];
+  dialogue:         DialogueTurn[];
+  estimatedSeconds: number;
+  interestText:     string;
+}
 
-  const scheduleText = data.todayEvents.length === 0
-    ? '今日の予定はありません。自由な時間を有効に使いましょう。'
-    : (() => {
-        let t = `今日は${data.todayEvents.length}件の予定があります。`;
-        data.todayEvents.slice(0, 3).forEach(ev => {
-          t += `${ev.startTime}から「${ev.title}」${ev.location ? `、${ev.location}で` : ''}があります。`;
-        });
-        return t;
-      })();
+export async function generateNewsSegment(params: {
+  uid:           string;
+  userName:      string;
+  interests:     string[];
+  targetMinutes: number;
+  hostIds?:      string[];
+  language?:     string;
+  topEmails?:    { from: string; subject: string }[];
+}): Promise<NewsSegmentData> {
+  const lang = params.language ?? 'ja';
 
-  const lookingAheadText = data.tomorrowEvents.length === 0
-    ? '明日以降の予定は現在登録されていません。今のうちに準備を進めておきましょう。'
-    : (() => {
-        let t = '明日以降の予定を確認しましょう。';
-        data.tomorrowEvents.slice(0, 2).forEach(ev => { t += `「${ev.title}」があります。`; });
-        return t;
-      })();
+  const userContext = await memoryService.getContext(params.uid).catch(() => null);
+  const cached = await getCachedNews(params.uid, lang, params.targetMinutes);
+  let rawChapters: ChapterDraft[];
+  if (cached) {
+    console.log('[newsSegment] using cached news');
+    rawChapters = cached;
+  } else {
+    const result = await claudeService.generateNewsCast({
+      userName:      params.userName,
+      interests:     params.interests,
+      currentHour:   new Date().getHours(),
+      hostIds:       params.hostIds,
+      language:      params.language,
+      userContext,
+      topEmails:     params.topEmails,
+      targetMinutes: params.targetMinutes,
+    });
+    rawChapters = result.chapters;
+    cacheNews(params.uid, lang, rawChapters, params.targetMinutes).catch(() => {});
+  }
 
-  return [
-    { id: 'top_of_mind',   title: '最優先事項',       iconName: 'flame-outline',
-      text: topMindText,       dialogue: d(topMindText) },
-    { id: 'schedule',      title: '今日のスケジュール', iconName: 'calendar-outline',
-      text: scheduleText,      dialogue: d(scheduleText) },
-    { id: 'looking_ahead', title: '今後の展望',        iconName: 'telescope-outline',
-      text: lookingAheadText,  dialogue: d(lookingAheadText) },
-    { id: 'next_steps',    title: '推奨アクション',    iconName: 'checkmark-done-outline',
-      text: `今日の${userName}さんへの推奨アクションです。優先度の高いメールへの返信と、今日の予定の最終確認をしておきましょう。`,
-      dialogue: d(`今日の${userName}さんへの推奨アクションです。優先度の高いメールへの返信と、今日の予定の最終確認をしておきましょう。`) },
-    { id: 'relevant_news', title: '関連ニュース',      iconName: 'newspaper-outline',
-      text: '今日の業界動向や関連ニュースをお届けします。気になる情報はあとでチェックしてみてください。',
-      dialogue: d('今日の業界動向や関連ニュースをお届けします。気になる情報はあとでチェックしてみてください。') },
-  ];
+  const fullText         = rawChapters.map(c => c.text).join('　');
+  const estimatedSeconds = Math.ceil(fullText.length / 5);
+  const times            = estimateChapterTimes(rawChapters.map(c => c.text), estimatedSeconds);
+
+  const chapters: BriefingChapter[] = rawChapters.map((c, i) => ({
+    id: c.id, title: c.title, iconName: c.iconName, text: c.text, startSec: times[i],
+  }));
+
+  const dialogue = splitTurns(rawChapters.flatMap(c => c.dialogue ?? []));
+  const interestText = params.interests.slice(0, 3).join('・') || 'テクノロジー・ビジネス';
+
+  return { chapters, dialogue, estimatedSeconds, interestText };
 }
 
 export const briefingService = {
@@ -211,6 +209,9 @@ export const briefingService = {
     isMockData?:  boolean,
     externalData?: ExternalToolData | null,
     skipAudio?:   boolean,
+    skipNews?:    boolean,
+    chatworkMyName?: string,
+    notionMyName?: string,
   ): Promise<BriefingScript> {
     const currentHour = new Date().getHours();
 
@@ -232,7 +233,7 @@ export const briefingService = {
       // ブリーフィング + Pro向けニュースキャストを並行生成（当日キャッシュあれば再利用）
       // isMockData時はニュースをスキップ（テスト時のAPI課金を防ぐ）
       const lang = language ?? 'ja';
-      const newsPromise = isPro && !isMockData
+      const newsPromise = isPro && !isMockData && !skipNews
         ? (async () => {
             if (uid) {
               const cached = await getCachedNews(uid, lang);
@@ -271,13 +272,15 @@ export const briefingService = {
           hostIds,
           language,
           notionPages:         notionPages
-            ? notionPages.filter(p => new Date(p.lastEdited).toDateString() === new Date().toDateString())
+            ? notionPages.filter(p => { const t = Date.now() - new Date(p.lastEdited).getTime(); return t >= 0 && t < 24 * 3600 * 1000; })
             : undefined,
           slackMessages:       slackMessages ?? undefined,
           slackTotalUnread:    slackTotalUnread ?? undefined,
           teamsChats:          teamsChats ?? undefined,
           chatworkMessages:    chatworkMessages ?? undefined,
           chatworkTotalUnread: chatworkTotalUnread ?? undefined,
+          chatworkMyName:      chatworkMyName,
+          notionMyName:        notionMyName,
         }),
         newsPromise,
       ]);
@@ -287,10 +290,10 @@ export const briefingService = {
         ...(newsResult?.chapters ?? []),
       ];
     } catch (err) {
-      console.error('[briefing] script generation failed:', err);
       const msg = err instanceof Error ? err.message : String(err);
+      console.error('[briefing] script generation failed:', msg.slice(0, 400));
       if (msg.includes('429') || msg.includes('quota')) throw err;
-      rawChapters = templateChapters(data, userName);
+      throw new Error(`generation_failed: ${msg.slice(0, 200)}`);
     }
 
     const fullText         = rawChapters.map((c) => c.text).join('　');
@@ -344,7 +347,7 @@ export const briefingService = {
     if (slackMessages !== null)    externalStats.slack    = { messageCount: slackTotalUnread ?? slackMessages.flatMap(ch => ch.messages).length };
     if (notionPages !== null) {
       const today = new Date().toDateString();
-      externalStats.notion = { pageCount: notionPages.filter(p => new Date(p.lastEdited).toDateString() === today).length };
+      externalStats.notion = { pageCount: notionPages.filter(p => { const t = Date.now() - new Date(p.lastEdited).getTime(); return t >= 0 && t < 24 * 3600 * 1000; }).length };
     }
     if (teamsChats !== null)       externalStats.teams    = { chatCount: teamsChats.length };
     if (chatworkMessages !== null) externalStats.chatwork = { messageCount: chatworkTotalUnread ?? chatworkMessages.length };

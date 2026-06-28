@@ -57,9 +57,11 @@ export const geminiTtsService = {
       }
 
       // HTTP接続がモバイルNATで切れた可能性あり。サーバーはStorage→Firestoreに書き込み済みの場合がある。
+      // ただし、サーバー側が明示的にエラーを返した場合（[geminiTts]プレフィックス）はポーリング不要。
       // 最大5分間15秒おきにポーリングして結果を取得する。
+      const isServerError = msg.includes('[geminiTts]');
       const uid = getAuth().currentUser?.uid;
-      if (uid) {
+      if (uid && !isServerError) {
         console.log('[gemini-tts] HTTP failed, polling Firestore for TTS result...');
         const userRef = doc(db, 'users', uid);
         for (let i = 0; i < 20; i++) {

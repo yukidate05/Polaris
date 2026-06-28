@@ -384,6 +384,7 @@ export const notionAuth = onRequest(
       workspace_id: string;
       workspace_name: string;
       workspace_icon: string | null;
+      owner?: { type?: string; user?: { name?: string } };
     };
 
     // Firestoreにアクセストークンを保存
@@ -391,6 +392,7 @@ export const notionAuth = onRequest(
       notionAccessToken: data.access_token,
       notionWorkspaceId: data.workspace_id,
       notionWorkspaceName: data.workspace_name,
+      notionMyName: data.owner?.user?.name ?? null,
     }, { merge: true });
 
     res.json({ success: true, workspaceName: data.workspace_name });

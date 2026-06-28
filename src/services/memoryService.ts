@@ -89,19 +89,33 @@ export const memoryService = {
     } | null,
   ): Promise<void> {
     const today = new Date().toISOString().slice(0, 10);
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+
+    // コードレベルのクリーンアップ（Geminiに頼らない）
+    const cleanedExisting: UserContext | null = existing ? {
+      ...existing,
+      // 7日以上前のフォローアップは除去
+      pendingFollowups: existing.pendingFollowups.filter(f => f.since >= sevenDaysAgo),
+      // 30日以上更新のないトピックは除去、「完了」「解決」「終了」を含むstatusも除去
+      topicStatuses: existing.topicStatuses.filter(s =>
+        s.lastUpdated >= thirtyDaysAgo &&
+        !['完了', '解決', '終了', 'クローズ', '完結'].some(w => s.status.includes(w))
+      ),
+    } : null;
 
     const emailLines = googleData.topEmails.slice(0, 8)
       .map(e => `・${e.from}: ${e.subject}`).join('\n') || 'なし';
     const eventLines = [...googleData.todayEvents, ...googleData.tomorrowEvents].slice(0, 8)
       .map(e => `・${e.startTime} ${e.title}`).join('\n') || 'なし';
 
-    const existingStr = existing
+    const existingStr = cleanedExisting
       ? JSON.stringify({
-          inferredRole:     existing.inferredRole,
-          frequentContacts: existing.frequentContacts.slice(0, 8),
-          recentTopics:     existing.recentTopics.slice(0, 10),
-          pendingFollowups: existing.pendingFollowups.slice(0, 5),
-          topicStatuses:    existing.topicStatuses.slice(0, 10),
+          inferredRole:     cleanedExisting.inferredRole,
+          frequentContacts: cleanedExisting.frequentContacts.slice(0, 8),
+          recentTopics:     cleanedExisting.recentTopics.slice(0, 10),
+          pendingFollowups: cleanedExisting.pendingFollowups.slice(0, 5),
+          topicStatuses:    cleanedExisting.topicStatuses.slice(0, 10),
         }, null, 2)
       : '{}';
 
@@ -144,10 +158,13 @@ ${externalBlock}
 - inferredRole: 会議・メールのパターンから職種・役割を推定（既存があれば大きく変えない）
 - frequentContacts: メール・外部ツールの送信者を追加・更新（最大10人、lastSeen=${today}で更新）
 - recentTopics: メール件名・予定・Slack/Chatworkのキーワードから主要トピック（最大10個）
-- pendingFollowups: 返信待ち・続きが必要そうなもの（最大5個、2週間以上前は除去）
+- pendingFollowups: 返信待ち・続きが必要そうなもの（最大5個）
+  【削除ルール】今日のデータで「返信済み」「解決」「完了」の証拠があるものは削除する。also最終確認日が1週間以上前のものは削除する。今日のメール・ツールデータに全く登場しないアイテムが5日以上経過している場合も削除する
 - topicStatuses: Slack・Chatwork・Notionから読み取れる「プロジェクト・話題の現在の状態」を記録する（最大10個）
   例: {"topic": "プロジェクトX", "status": "遅延が発生、Aさんが対応中", "source": "Chatwork", "lastUpdated": "${today}"}
-  既存のtopicStatusesは今日のデータで状態が変わっていれば上書き、変化がなければそのまま保持
+  【更新ルール】今日のデータで状態が変わっていれば上書き（lastUpdated=${today}に更新）
+  【削除ルール】今日のデータで「完了」「解決」「終了」「クローズ」したことが明示されているトピックは出力JSONから除外すること（statusに「完了」等を書くのではなく、エントリ自体を削除する）
+  変化がなく完了でもないものはそのまま保持
 
 JSONのみ返してください:
 {

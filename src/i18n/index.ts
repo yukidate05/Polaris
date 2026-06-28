@@ -1,6 +1,6 @@
 import { useUserPreferencesStore } from '@stores/userPreferencesStore';
 
-export type SupportedLang = 'ja' | 'en' | 'zh' | 'ko' | 'es' | 'fr' | 'de' | 'pt';
+export type SupportedLang = 'ja' | 'en' | 'zh' | 'ko' | 'es' | 'it' | 'fr' | 'de' | 'pt';
 
 export const SUPPORTED_LANGUAGES: { code: SupportedLang; label: string; nativeLabel: string }[] = [
   { code: 'ja', label: 'Japanese',    nativeLabel: '日本語' },
@@ -8,6 +8,7 @@ export const SUPPORTED_LANGUAGES: { code: SupportedLang; label: string; nativeLa
   { code: 'zh', label: 'Chinese',     nativeLabel: '中文' },
   { code: 'ko', label: 'Korean',      nativeLabel: '한국어' },
   { code: 'es', label: 'Spanish',     nativeLabel: 'Español' },
+  { code: 'it', label: 'Italian',     nativeLabel: 'Italiano' },
   { code: 'fr', label: 'French',      nativeLabel: 'Français' },
   { code: 'de', label: 'German',      nativeLabel: 'Deutsch' },
   { code: 'pt', label: 'Portuguese',  nativeLabel: 'Português' },
@@ -20,7 +21,7 @@ export function detectDeviceLang(): SupportedLang {
     const locale = getLocales()[0]?.languageCode ?? 'ja';
     const map: Record<string, SupportedLang> = {
       ja: 'ja', zh: 'zh', ko: 'ko',
-      es: 'es', fr: 'fr', de: 'de', pt: 'pt', en: 'en',
+      es: 'es', it: 'it', fr: 'fr', de: 'de', pt: 'pt', en: 'en',
     };
     return map[locale] ?? 'en';
   } catch {
