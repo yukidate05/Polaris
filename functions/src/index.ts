@@ -384,15 +384,31 @@ export const notionAuth = onRequest(
       workspace_id: string;
       workspace_name: string;
       workspace_icon: string | null;
-      owner?: { type?: string; user?: { name?: string } };
+      owner?: { type?: string; user?: { id?: string; name?: string } };
     };
+
+    // notionMyNameが取得できない場合、/users/me でbot情報から補完を試みる
+    let notionMyName: string | null = data.owner?.user?.name ?? null;
+    const notionOwnerId: string | null = data.owner?.user?.id ?? null;
+    if (!notionMyName && notionOwnerId) {
+      try {
+        const meRes = await fetch(`https://api.notion.com/v1/users/${notionOwnerId}`, {
+          headers: { 'Authorization': `Bearer ${data.access_token}`, 'Notion-Version': '2022-06-28' },
+        });
+        if (meRes.ok) {
+          const me = await meRes.json() as { name?: string };
+          notionMyName = me.name ?? null;
+        }
+      } catch { /* non-critical */ }
+    }
 
     // Firestoreにアクセストークンを保存
     await db.collection('users').doc(uid).set({
       notionAccessToken: data.access_token,
       notionWorkspaceId: data.workspace_id,
       notionWorkspaceName: data.workspace_name,
-      notionMyName: data.owner?.user?.name ?? null,
+      notionMyName,
+      notionOwnerId,
     }, { merge: true });
 
     res.json({ success: true, workspaceName: data.workspace_name });
@@ -1002,7 +1018,26 @@ export const notionPages = onRequest(
 
     const snap = await db.collection('users').doc(uid).get();
     const token = snap.data()?.notionAccessToken as string | undefined;
+    let notionOwnerId = snap.data()?.notionOwnerId as string | undefined;
     if (!token) { res.status(404).send('Notion not connected'); return; }
+
+    // notionOwnerId未保存の既存ユーザー向け移行: Notion APIから取得して保存
+    if (!notionOwnerId) {
+      try {
+        const meRes = await fetch('https://api.notion.com/v1/users/me', {
+          headers: { 'Authorization': `Bearer ${token}`, 'Notion-Version': '2022-06-28' },
+        });
+        if (meRes.ok) {
+          const me = await meRes.json() as { id?: string; name?: string };
+          if (me.id) {
+            notionOwnerId = me.id;
+            const save: Record<string, string> = { notionOwnerId: me.id };
+            if (me.name) save.notionMyName = me.name;
+            db.collection('users').doc(uid).update(save).catch(() => {});
+          }
+        }
+      } catch { /* non-critical */ }
+    }
 
     const response = await fetch('https://api.notion.com/v1/search', {
       method: 'POST',
@@ -1046,13 +1081,15 @@ export const notionPages = onRequest(
       } catch { /* non-critical */ }
     }));
 
-    // Enrich pages with resolved editor names
+    // Enrich pages with resolved editor names; flag self-edits so client can filter
     const enriched = {
       ...data,
       results: data.results.map((p) => {
         const by = p.last_edited_by as { id?: string; name?: string } | undefined;
         if (!by?.id) return p;
-        return { ...p, last_edited_by: { ...by, name: editorNames[by.id] ?? by.id } };
+        const resolvedName = editorNames[by.id] ?? by.id;
+        const isSelfEdit = notionOwnerId ? by.id === notionOwnerId : false;
+        return { ...p, last_edited_by: { ...by, name: resolvedName }, self_edited: isSelfEdit };
       }),
     };
     res.json(enriched);

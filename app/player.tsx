@@ -38,12 +38,13 @@ export default function PlayerScreen() {
   const { script, newsSegment, transitionAudioUri, newsStatus } = useBriefingStore();
   const { user } = useAuthStore();
 
-  const [playPhase,   setPlayPhase]   = useState<PlayPhase>('briefing');
-  const [isPlaying,   setIsPlaying]   = useState(false);
-  const [currentSec,  setCurrentSec]  = useState(0);
-  const [totalSec,    setTotalSec]    = useState(script?.estimatedSeconds ?? 0);
-  const [rate,        setRate]        = useState(1.0);
-  const [syncOffset,  setSyncOffset]  = useState(-1.0);
+  const [playPhase,          setPlayPhase]          = useState<PlayPhase>('briefing');
+  const [isPlaying,          setIsPlaying]          = useState(false);
+  const [currentSec,         setCurrentSec]         = useState(0);
+  const [totalSec,           setTotalSec]           = useState(script?.estimatedSeconds ?? 0);
+  const [rate,               setRate]               = useState(1.0);
+  const [syncOffset,         setSyncOffset]         = useState(-1.0);
+  const [briefingCompleted,  setBriefingCompleted]  = useState(false); // ブリーフィングが自然終了したか
 
   const playerRef     = useRef<AudioPlayer | null>(null);
   const timerRef      = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -74,6 +75,19 @@ export default function PlayerScreen() {
       setPlayPhase('news');
     }
   }, [playPhase, isPlaying, newsSegment?.audioUri]);
+
+  // ブリーフィング自然終了後、ニュースが遅れて届いた場合に遷移する
+  // （デバイスTTS再生中に音声TTS・ニューステキストが並行生成されるケースで必要）
+  useEffect(() => {
+    if (!briefingCompleted || playPhase !== 'briefing') return;
+    if (transitionAudioUri) {
+      setBriefingCompleted(false);
+      setPlayPhase('transition');
+    } else if (newsSegment?.audioUri) {
+      setBriefingCompleted(false);
+      setPlayPhase('news');
+    }
+  }, [briefingCompleted, transitionAudioUri, newsSegment?.audioUri, playPhase]);
 
   // バックグラウンドから戻った時、オーディオが外部割り込みで止まっていたら再開（Problem 3対策）
   useEffect(() => {
@@ -245,6 +259,12 @@ export default function PlayerScreen() {
               setPlayPhase('transition');
             } else if (phase === 'briefing' && newsUri) {
               setPlayPhase('news');
+            } else if (phase === 'briefing') {
+              completedNaturallyRef.current = true;
+              setIsPlaying(false);
+              setCurrentSec(totalSecRef.current);
+              setBriefingCompleted(true);
+              if (playerRef.current) { lastSeekRef.current = Date.now(); playerRef.current.seekTo(0).catch(() => {}); }
             } else if (phase === 'transition' && newsUri) {
               setPlayPhase('news');
             } else {
@@ -294,7 +314,20 @@ export default function PlayerScreen() {
       setCurrentSec(Math.min(seekOffsetRef.current + elapsed, estimatedSecs));
     }, 250);
     await speechService.speak(script.fullText, rateRef.current as SpeechRate, {
-      onDone:  () => { setIsPlaying(false); clearInterval(timerRef.current!); },
+      onDone: () => {
+        clearInterval(timerRef.current!);
+        setIsPlaying(false);
+        const transUri = transitionAudioUriRef.current;
+        const newsUri  = newsAudioUriRef.current;
+        if (transUri) {
+          setPlayPhase('transition');
+        } else if (newsUri) {
+          setPlayPhase('news');
+        } else {
+          setCurrentSec(estimatedSecs);
+          setBriefingCompleted(true);
+        }
+      },
       onError: () => { setIsPlaying(false); clearInterval(timerRef.current!); },
     });
   }

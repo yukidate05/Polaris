@@ -53,13 +53,16 @@ export const notionService = {
       url: string;
       last_edited_time: string;
       last_edited_by?: { id?: string; name?: string };
+      self_edited?: boolean;
       properties?: { title?: { title?: { plain_text: string }[] }[] };
-    }>).map((p) => ({
-      id:           p.id,
-      url:          p.url,
-      lastEdited:   p.last_edited_time,
-      lastEditedBy: p.last_edited_by?.name,
-      title:        (p.properties?.title as { title?: { plain_text: string }[] } | undefined)?.title?.[0]?.plain_text ?? '無題',
-    }));
+    }>)
+      .filter(p => !p.self_edited) // 自分が最終更新者のページは除外
+      .map((p) => ({
+        id:           p.id,
+        url:          p.url,
+        lastEdited:   p.last_edited_time,
+        lastEditedBy: p.last_edited_by?.name,
+        title:        (p.properties?.title as { title?: { plain_text: string }[] } | undefined)?.title?.[0]?.plain_text ?? '無題',
+      }));
   },
 };

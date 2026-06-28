@@ -272,7 +272,13 @@ export const briefingService = {
           hostIds,
           language,
           notionPages:         notionPages
-            ? notionPages.filter(p => { const t = Date.now() - new Date(p.lastEdited).getTime(); return t >= 0 && t < 24 * 3600 * 1000; })
+            ? notionPages.filter(p => {
+                const t = Date.now() - new Date(p.lastEdited).getTime();
+                if (!(t >= 0 && t < 24 * 3600 * 1000)) return false;
+                // 自分自身が最終更新者のページは除外（自分の更新を「他者の行動」として報告させない）
+                if (notionMyName && p.lastEditedBy === notionMyName) return false;
+                return true;
+              })
             : undefined,
           slackMessages:       slackMessages ?? undefined,
           slackTotalUnread:    slackTotalUnread ?? undefined,

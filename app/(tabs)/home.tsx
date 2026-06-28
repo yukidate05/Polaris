@@ -187,6 +187,10 @@ export default function HomeScreen() {
         const userSnap = await getDoc(doc(db, 'users', user.uid));
         chatworkMyName = userSnap.data()?.chatworkName as string | undefined;
         notionMyName = userSnap.data()?.notionMyName as string | undefined;
+        // Notion再認証前の既存ユーザー向けフォールバック: Googleアカウント名を使用
+        if (!notionMyName) {
+          notionMyName = profile?.displayName ?? user?.displayName ?? undefined;
+        }
       }
       const sc = await briefingService.generate(
         data, firstName, interests, hasPlayed, user?.uid ?? undefined, sessionData, selectedHostIds, userIsPro, lang, isMockData, externalDataRef.current, SKIP_TTS, true, chatworkMyName, notionMyName
