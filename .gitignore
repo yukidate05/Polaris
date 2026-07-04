@@ -58,3 +58,12 @@ test-gemini.mjs
 # Reference/temp images
 img/Huxe/
 img/icon/ChatGPT*
+
+# Build artifacts (too large for GitHub, re-downloadable from EAS/Play Console)
+*.aab
+
+# Firebase CLI local cache
+.firebase/
+
+# Separate clone (GitHub Pages docs, tracked independently on main)
+/docs

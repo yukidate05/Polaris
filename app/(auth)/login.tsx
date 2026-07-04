@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { View, Text, StyleSheet, Alert, Platform, Linking } from 'react-native';
 import { useT } from '@/i18n';
 
-const PRIVACY_POLICY_URL = 'https://yukidate05.github.io/Polaris/privacy.html';
-const TERMS_URL = 'https://yukidate05.github.io/Polaris/terms.html';
+const PRIVACY_POLICY_URL = 'https://isyd.me/privacy';
+const TERMS_URL = 'https://isyd.me/terms';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as AppleAuthentication from 'expo-apple-authentication';
