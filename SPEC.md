@@ -353,11 +353,11 @@ users/{uid}/cache/dailyNews    // date, language, chapters, cachedAt
 | 35 | 上記33・34の内容をまとめて初めてEASビルド・アップロード（`app.config.ts`のversionCodeは32→35に一括で上げた） | 内部テスト アップロード済み（Google Play Developer APIで確認済み） |
 | 36 | ニュースパート2段階生成（テーマ選定→深堀り、`selectNewsTheme`/`generateNewsCast`）・targetMinutes追従修正 | ビルド完了（EAS build ID `b94fcac1-d60c-4151-a3c2-b0ad4a934e7a`）のみ・Play Consoleへは未アップロードのままvc37に差し替え |
 | 37 | ニュース遷移画面（本編→ニュースパート間）の表示修正。`newscast_label`翻訳キー欠落・`interestText`（実テーマと無関係な固定の興味カテゴリ表示）を廃止し`news_briefing_label`固定ラベルに置き換え | 内部テスト アップロード済み（2026-07-06、EAS build ID `7b4695d8-5dad-4d21-9afe-5bd45eb05612`） |
-| 38 | 生成フローのサーバー側移行（briefingWorkerジョブ購読方式・FCM完了プッシュ・起動時ハイドレーション）+ player未定義i18nキー9件追加 | ビルド予定（2026-07-07） |
+| 38 | 生成フローのサーバー側移行（briefingWorkerジョブ購読方式・FCM完了プッシュ・起動時ハイドレーション）+ player未定義i18nキー9件追加 | 内部テスト アップロード済み（2026-07-07、sha1一致確認済み） |
 
 | トラック | 状態 | バージョン |
 |---|---|---|
-| 内部テスト | アップロード済み | vc37 |
+| 内部テスト | アップロード済み | vc38 |
 | クローズドテスト Alpha | 審査中 | vc8 |
 | 製品版 | 未提出 | — |
 
