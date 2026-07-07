@@ -59,13 +59,13 @@ function lineLengthInstruction(lang: string): string {
   return '15–25 words';
 }
 
-// Real Gemini output runs well short of the instructed line length (measured
-// ~60 chars/line for CJK against an 80–120 instruction, and the actual TTS
-// audio runs shorter still than the text-length estimate — vc37 field reports
-// measured ~3 min for a 5-min target). Compensate by assuming pessimistically
-// short lines when converting targetMinutes → line count.
+// Real Gemini output runs well short of the instructed line length, and the
+// actual TTS audio runs shorter still than the char/5sec text estimate.
+// Measured 2026-07-07 on production (ja): 40 raw lines → 367s of real audio
+// (~9.2s/line, i.e. real audio ≈ 0.6× the text estimate). These constants are
+// derived from that measurement so a 5-min target yields ≥5 min of real audio.
 function avgLineChars(lang: string): number {
-  return ['Japanese', 'Chinese', 'Korean'].includes(lang) ? 50 : 65;
+  return ['Japanese', 'Chinese', 'Korean'].includes(lang) ? 45 : 60;
 }
 
 function distributeCounts(total: number, buckets: number): number[] {

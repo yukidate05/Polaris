@@ -1,6 +1,6 @@
 # Polaris — 仕様書
 
-最終更新: 2026-07-06（versionCode 37を内部テストへアップロード済み。ニュースパート2段階生成（テーマ選定→深堀り）実装・実API検証済み + ニュース遷移画面の表示修正）
+最終更新: 2026-07-07（生成フローをサーバー側ワーカー（briefingWorker）へ移行・本番E2E検証済み。vc38ビルド予定）
 
 ## プロジェクト概要
 
@@ -276,7 +276,9 @@ setNewsSegment / setNewsAudioUri / clearNews
 
 ---
 
-## Firebase Functions（`asia-northeast1`、全11エンドポイント）
+## Firebase Functions（`asia-northeast1`、HTTPエンドポイント11 + Firestoreトリガー1）
+
+**briefingWorker**（Firestoreトリガー、2026-07-07〜）: `users/{uid}/briefingJobs/current`への書き込みで起動するステートマシン。生成の詳細は「進行中: 生成フローのサーバー側移行」参照。Secrets: GEMINI_API_KEY、timeout 540s、memory 1GiB。
 
 | Function | 用途 | Secrets | レート制限 | サブスク確認 |
 |---|---|---|---|---|
@@ -331,7 +333,8 @@ users/{uid}/cache/dailyNews    // date, language, chapters, cachedAt
 - ✅ Google Cloud Consoleブランディング（ホームページ/プライバシー/利用規約URL・承認済みドメイン）検証済み
 - ✅ 2026-07-07: Googleから「同意画面のスコープと申請スコープの不一致」指摘 → データアクセスページに不足スコープを追加登録して解消。登録済みスコープ: `openid` / `userinfo.email` / `userinfo.profile`（非機密）、`calendar.readonly`（機密・使用理由記入済み）、`gmail.readonly`（制限付き・使用理由/デモ動画 https://youtu.be/Xy82SpjVpD8 登録済み）。保存時に検証リクエストが自動更新され再審査へ
 - ⏳ データアクセス審査中（Trust and Safetyチーム受領済み、プロセスは4〜6週間、初回メールは3〜5日以内）。ホームページ要件・ブランドガイドラインは審査済み✓、プライバシーポリシー要件は審査中。審査通過で警告解消・100ユーザー制限解除
-- 注意: 制限付きスコープのためCASA（Cloud App Security Assessment、$75〜150程度）が必要になる可能性あり
+- 注意: 制限付きスコープのためCASA（Cloud App Security Assessment、$75〜150程度）が必要になる可能性あり。ただし無料のセルフスキャンで済むルートもあるため、Googleから正式に要求されてから対応を検討（2026-07-08時点で未請求・要否未確定）
+- 支払い済み費用（参考）: Google Playデベロッパー登録料 $25（初回のみ・買い切り）。CASAとは無関係
 
 ---
 
@@ -350,6 +353,7 @@ users/{uid}/cache/dailyNews    // date, language, chapters, cachedAt
 | 35 | 上記33・34の内容をまとめて初めてEASビルド・アップロード（`app.config.ts`のversionCodeは32→35に一括で上げた） | 内部テスト アップロード済み（Google Play Developer APIで確認済み） |
 | 36 | ニュースパート2段階生成（テーマ選定→深堀り、`selectNewsTheme`/`generateNewsCast`）・targetMinutes追従修正 | ビルド完了（EAS build ID `b94fcac1-d60c-4151-a3c2-b0ad4a934e7a`）のみ・Play Consoleへは未アップロードのままvc37に差し替え |
 | 37 | ニュース遷移画面（本編→ニュースパート間）の表示修正。`newscast_label`翻訳キー欠落・`interestText`（実テーマと無関係な固定の興味カテゴリ表示）を廃止し`news_briefing_label`固定ラベルに置き換え | 内部テスト アップロード済み（2026-07-06、EAS build ID `7b4695d8-5dad-4d21-9afe-5bd45eb05612`） |
+| 38 | 生成フローのサーバー側移行（briefingWorkerジョブ購読方式・FCM完了プッシュ・起動時ハイドレーション）+ player未定義i18nキー9件追加 | ビルド予定（2026-07-07） |
 
 | トラック | 状態 | バージョン |
 |---|---|---|
@@ -430,11 +434,19 @@ vc37実機テストで報告された4件の不具合調査の結果、①生成
 - ③ニュース実測3分問題: WAVヘッダーから実音声長を算出してジョブdocに記録（初の実測データ）。`avgLineChars`をさらに下げ、テンプレートバンクを28行→36行に拡張
 
 **タスクリスト**:
-- [ ] briefingWorker（Firestoreトリガー・3ステージ）実装
-- [ ] ニュースプロンプトビルダーのサーバー移植＋長さ補正＋実音声長計測
-- [ ] FCMトークン登録＋完了プッシュ（9言語）
-- [ ] クライアント: ジョブ投入+onSnapshot購読+起動時ハイドレーション、AppState復帰ハック・ローカル通知削除
-- [ ] typecheck→Functions一括デプロイ→実機検証→vc38ビルド・アップロード
+- [x] briefingWorker（Firestoreトリガー・3ステージ）実装（`functions/src/briefingWorker.ts`、共有ヘルパーは`shared.ts`に分離）
+- [x] ニュースプロンプトビルダーのサーバー移植＋長さ補正＋実音声長計測
+- [x] FCMトークン登録＋完了プッシュ（9言語、Expo push serviceではなく`admin.messaging()`直）
+- [x] クライアント: ジョブ投入+onSnapshot購読+起動時ハイドレーション（`briefingJobService.ts`）、AppState復帰ハック・ローカル通知削除
+- [x] typecheck（app/functions両方クリーン）→Functions一括デプロイ→本番E2E検証
+- [ ] vc38ビルド・アップロード→実機で確認（プッシュ通知はfcmToken登録がvc38からのため実機でのみ検証可能）
+
+**本番E2E検証結果（2026-07-07、実ジョブ投入で全ステージ確認）**:
+- 全ステージ成功: queued→10秒でクレーム→台本生成→ニュース2段階生成（実在テーマ選定・4章45ターン）→本編TTS→ニュースTTS→completed（計282秒）
+- 本編・ニュースとも`engine=gemini`（Aria/Crest音声）で生成されることを確認（④解消）
+- **重要な実測データ**: ニューステキスト推定606秒に対し実音声367秒。**実音声はテキスト推定の約0.6倍**（約9.2秒/行）と判明 — 「ニュースが3分しかない」報告の定量的裏付け。この実測から`avgLineChars`をCJK 45/非CJK 60に再補正して再デプロイ済み（5分ターゲットで実音声約5.7分になる計算）
+- Firestoreトリガー（v2）の初回デプロイはEventarc APIの伝播待ちで失敗する。リトライで成功（既知パターン）
+- `firebase deploy`前に`functions`で`npm run build`（tsc）が必要（`lib/`はgitignore対象のため新マシンでは未生成だった）
 
 ---
 
