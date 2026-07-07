@@ -3,7 +3,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useFocusEffect } from 'expo-router';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, ActivityIndicator, Dimensions, AppState, Platform,
+  StyleSheet, ActivityIndicator, Dimensions, Platform,
 } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
@@ -14,17 +14,16 @@ import { AuroraBackground, PaywallModal, SubscriptionStatusBanner, ChatworkIcon 
 import { useAuthStore } from '@stores/authStore';
 import { subscriptionService, type AccessStatus } from '@services/subscriptionService';
 import { checkIsPro, getOfferings, purchasePackage } from '@lib/revenuecat';
-import { useBriefingStore, type BriefingStatus, type NewsSegment } from '@stores/briefingStore';
+import { useBriefingStore, type BriefingStatus } from '@stores/briefingStore';
 import { useUserPreferencesStore } from '@stores/userPreferencesStore';
 import { googleDataService, MOCK_GOOGLE_DATA } from '@services/googleDataService';
-import { briefingService, fetchExternalToolData, generateNewsSegment, type NewsSegmentData, type ExternalStats, type ExternalToolData } from '@services/briefingService';
-import { geminiTtsService } from '@services/geminiTtsService';
-import { googleTtsService } from '@services/googleTtsService';
+import { briefingService, fetchExternalToolData, prepareBriefingInputs, buildScriptFromChapters, type PreparedBriefingInputs, type ExternalStats, type ExternalToolData } from '@services/briefingService';
+import { submitBriefingJob, getCurrentJob, subscribeBriefingJob, type BriefingJob } from '@services/briefingJobService';
+import { memoryService } from '@services/memoryService';
 import { getTransitionAudioUri } from '@services/transitionVoiceService';
 import { sessionService } from '@services/sessionService';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@lib/firebase';
-import { getAuth } from 'firebase/auth';
 import { bgmService } from '@services/bgmService';
 import { useT } from '@/i18n';
 import Constants from 'expo-constants';
@@ -33,7 +32,6 @@ const { height: SCREEN_H } = Dimensions.get('window');
 const HERO_H = Math.round(SCREEN_H * 0.50);
 const isExpoGo = Constants.appOwnership === 'expo';
 const AUTO_BRIEFING = true;
-const SKIP_TTS      = true  // audio is generated separately in Phase 2;
 
 
 function getGreetingKey(h: number) {
@@ -81,11 +79,16 @@ export default function HomeScreen() {
   const { selectedHostIds, preferences } = useUserPreferencesStore();
   const {
     status, googleData, script, hasPlayed, error,
-    setStatus, setGoogleData, setScript, updateAudioUri, setError, setHasPlayed,
-    setNewsStatus, setNewsSegment, setNewsAudioUri, setTransitionAudioUri, clearNews,
+    setStatus, setGoogleData, setScript, setError, setHasPlayed,
+    setNewsStatus, clearNews,
   } = useBriefingStore();
 
-  const newsTextPromiseRef = useRef<Promise<NewsSegmentData | null> | null>(null);
+  // Server-side job flow: submit → subscribe. These refs track what has already
+  // been applied to the store so repeated snapshots stay idempotent.
+  const jobUnsubRef        = useRef<null | (() => void)>(null);
+  const jobAppliedRef      = useRef({ jobId: '', script: false, audio: false, news: false, newsAudio: false });
+  const preparedInputsRef  = useRef<PreparedBriefingInputs | null>(null);
+  const memoryExtractedRef = useRef('');
 
   const firstName = profile?.displayName?.split(' ')[0]
     ?? user?.displayName?.split(' ')[0]
@@ -130,11 +133,93 @@ export default function HomeScreen() {
     }
   }
 
+  const detachJobListener = useCallback(() => {
+    jobUnsubRef.current?.();
+    jobUnsubRef.current = null;
+  }, []);
+
+  // Apply job snapshots to the briefing store. Called for every Firestore
+  // update of users/{uid}/briefingJobs/current — both during live generation
+  // and when re-attaching after a process kill (hydration).
+  const attachJobListener = useCallback((uid: string) => {
+    detachJobListener();
+    jobUnsubRef.current = subscribeBriefingJob(uid, (job: BriefingJob | null) => {
+      if (!job) return;
+      const st = useBriefingStore.getState();
+      if (jobAppliedRef.current.jobId !== job.jobId) {
+        jobAppliedRef.current = { jobId: job.jobId, script: false, audio: false, news: false, newsAudio: false };
+      }
+      const applied = jobAppliedRef.current;
+
+      if (job.status === 'error') {
+        if (job.error === 'quota_exceeded' || job.error?.includes('cooldown_active')) st.setStatus('quota_exceeded');
+        else st.setError(job.error || 'generation_failed');
+        detachJobListener();
+        return;
+      }
+
+      if (job.script && !applied.script) {
+        applied.script = true;
+        st.setScript(buildScriptFromChapters(
+          job.script.chapters, job.script.dialogue, job.script.estimatedSeconds, job.audioUrl ?? null,
+        )); // → status 'ready'（デバイスTTSで再生可能）
+        if (!job.audioUrl) st.setStatus('generating_audio');
+
+        // 記憶抽出はアプリ生存中のみ（ジョブ投入時のコンテキストがある場合のみ実行）
+        const prep = preparedInputsRef.current;
+        const gd = st.googleData;
+        if (prep && gd && memoryExtractedRef.current !== job.jobId) {
+          memoryExtractedRef.current = job.jobId;
+          memoryService.extractAndSave(uid, gd, prep.userContext, {
+            slackMessages:    prep.external.slackMessages,
+            notionPages:      prep.external.notionPages,
+            chatworkMessages: prep.external.chatworkMessages,
+          }).catch((e) => console.error('[memory] background update failed:', e));
+        }
+      }
+
+      if (job.audioUrl && applied.script && !applied.audio) {
+        applied.audio = true;
+        st.updateAudioUri(job.audioUrl);
+        st.setStatus('ready');
+      }
+
+      if (job.news && !applied.news) {
+        applied.news = true;
+        st.setNewsStatus('generating');
+        const newsScript = buildScriptFromChapters(
+          job.news.chapters, job.news.dialogue, job.news.estimatedSeconds, null,
+        );
+        st.setNewsSegment({
+          chapters:         newsScript.chapters,
+          dialogue:         job.news.dialogue,
+          estimatedSeconds: job.news.estimatedSeconds,
+          interestText:     job.newsTheme ?? '',
+          audioUri:         job.newsAudioUrl ?? null,
+        });
+        const lang = useUserPreferencesStore.getState().preferences.language;
+        getTransitionAudioUri(lang).then(uri => st.setTransitionAudioUri(uri)).catch(() => {});
+      }
+
+      if (job.newsAudioUrl && applied.news && !applied.newsAudio) {
+        applied.newsAudio = true;
+        st.setNewsAudioUri(job.newsAudioUrl);
+        st.setNewsStatus('ready');
+      }
+      if (job.newsError && applied.news) st.setNewsStatus('error');
+
+      if (job.status === 'completed' && (!job.news || applied.newsAudio || job.newsError)) {
+        detachJobListener();
+      }
+    });
+  }, [detachJobListener]);
+
+  useEffect(() => () => { jobUnsubRef.current?.(); }, []);
+
   const generateBriefing = useCallback(async () => {
     if (isGenerating) return;
 
     // ── 1. Googleデータを取得 ──────────────────────────────────────────
-    newsTextPromiseRef.current = null;
     clearNews(); // 前回のニュース状態をクリア（再生成時に旧音声へジャンプするのを防ぐ）
     setStatus('fetching');
     let data = googleData;
@@ -177,7 +262,7 @@ export default function HomeScreen() {
         }
       }
 
-      // ── 3. Phase 1: スクリプト生成（~60-80秒） ──────────────────────
+      // ── 3. スクリプトプロンプト構築 → サーバー側ジョブ投入 ──────────
       setStatus('generating_script');
       const prefs = useUserPreferencesStore.getState().preferences;
       const lang = prefs.language;
@@ -193,88 +278,33 @@ export default function HomeScreen() {
           notionMyName = profile?.displayName ?? user?.displayName ?? undefined;
         }
       }
-      const sc = await briefingService.generate(
-        data, firstName, interests, hasPlayed, user?.uid ?? undefined, sessionData, selectedHostIds, userIsPro, lang, isMockData, externalDataRef.current, SKIP_TTS, chatworkMyName, notionMyName
+
+      // Expo Go／未ログイン時はワーカーを使えないため、従来のクライアント内生成（音声なし）
+      if (isMockData || !user?.uid) {
+        const sc = await briefingService.generate(
+          data, firstName, interests, hasPlayed, user?.uid ?? undefined, sessionData, selectedHostIds, userIsPro, lang, true, externalDataRef.current, true, chatworkMyName, notionMyName
+        );
+        setScript(sc);
+        return;
+      }
+
+      const prepared = await prepareBriefingInputs(
+        data, firstName, interests, hasPlayed, user.uid, sessionData, selectedHostIds, userIsPro, lang, externalDataRef.current, chatworkMyName, notionMyName
       );
-      setScript(sc); // → status: 'ready'、音声なしでも再生可能な状態に
-      if (user?.uid) subscriptionService.recordGeneration(user.uid);
+      preparedInputsRef.current = prepared;
 
-      // ── 4a. Proの場合: ニューステキスト生成をすぐバックグラウンドで開始（TTS前）──
-      if (userIsPro && !isMockData && user?.uid) {
-        const targetMinutes = Math.max(5, Math.round((600 - sc.estimatedSeconds) / 60));
-        setNewsStatus('generating');
-        newsTextPromiseRef.current = generateNewsSegment({
-          uid:           user.uid,
-          userName:      firstName,
-          interests:     prefs.topicsOfInterest ?? [],
-          targetMinutes,
-          hostIds:       selectedHostIds ?? undefined,
-          language:      lang,
-          topEmails:     data.topEmails,
-          externalData:  externalDataRef.current,
-        }).catch(e => { console.error('[home] news text gen failed:', e); return null; });
-      }
-
-      // ── 4b. Phase 2: ブリーフィング音声生成（~200秒）─────────────
-      if (!isMockData) {
-        setStatus('generating_audio');
-        try {
-          const audioUri = await geminiTtsService.generateDialogueAudio(sc.dialogue, selectedHostIds ?? undefined);
-          updateAudioUri(audioUri);
-        } catch {
-          try {
-            const audioUri = await googleTtsService.generateDialogueAudio(sc.dialogue, lang);
-            updateAudioUri(audioUri);
-          } catch {
-            console.warn('[home] Both TTS services failed, falling back to device TTS');
-          }
-        }
-        setStatus('ready');
-
-        // ── 4c. ブリーフィングTTS完了後 → ニュースTTS生成（直列）──
-        if (userIsPro && newsTextPromiseRef.current && user?.uid) {
-          const newsText = await newsTextPromiseRef.current;
-          if (newsText) {
-            setNewsSegment({
-              chapters: newsText.chapters,
-              dialogue: newsText.dialogue,
-              estimatedSeconds: newsText.estimatedSeconds,
-              interestText: newsText.interestText,
-              audioUri: null,
-            });
-
-            // 遷移アナウンス（言語ごとに事前生成済みのAria音声・固定フレーズ）→ 即セット
-            const transUri = await getTransitionAudioUri(lang).catch(() => null);
-            setTransitionAudioUri(transUri);
-
-            // ニュースTTS（~3min）→ バックグラウンドで生成、完了次第セット（ブリーフィング再生中に完了する想定）
-            geminiTtsService.generateDialogueAudio(newsText.dialogue, selectedHostIds ?? undefined)
-              .catch(async () => googleTtsService.generateDialogueAudio(newsText.dialogue, lang).catch(() => null))
-              .then(newsUri => {
-                if (newsUri) {
-                  setNewsAudioUri(newsUri);
-                  setNewsStatus('ready');
-                } else {
-                  setNewsStatus('error');
-                }
-              });
-          } else {
-            setNewsStatus('error');
-          }
-        }
-
-        // バックグラウンド生成完了通知
-        if (AppState.currentState !== 'active') {
-          Notifications.scheduleNotificationAsync({
-            content: {
-              title: 'ブリーフィング完成',
-              body: '本日のDaily Briefが準備できました。今すぐ再生しましょう。',
-              ...(Platform.OS === 'android' ? { channelId: 'briefing' } : {}),
-            },
-            trigger: null,
-          }).catch(() => {});
-        }
-      }
+      // 以降の生成（スクリプト・ニュース・TTS）は全てサーバー側ワーカーが実行。
+      // アプリがkillされてもジョブは進行し、完了時はFCMプッシュで通知される。
+      await submitBriefingJob(user.uid, prepared, {
+        userName:  firstName,
+        language:  lang,
+        interests,
+        topEmails: data.topEmails ?? [],
+        hostIds:   selectedHostIds ?? undefined,
+        isPro:     userIsPro,
+      });
+      if (userIsPro) setNewsStatus('generating');
+      attachJobListener(user.uid);
     } catch (e: any) {
       bgmService.stop();
       const msg = e?.message ?? '';
@@ -339,59 +369,66 @@ export default function HomeScreen() {
     setup().catch(() => {});
   }, []);
 
+  // FCMデバイストークンを登録（サーバー側ワーカーが完了プッシュを送るために使用）
+  useEffect(() => {
+    if (!user?.uid || isExpoGo) return;
+    const uid = user.uid;
+    (async () => {
+      try {
+        const token = await Notifications.getDevicePushTokenAsync();
+        if (token?.data) {
+          await setDoc(doc(db, 'users', uid), {
+            fcmToken: String(token.data),
+            fcmTokenUpdatedAt: serverTimestamp(),
+          }, { merge: true });
+        }
+      } catch (e) {
+        console.warn('[push] FCM token registration failed:', e);
+      }
+    })();
+  }, [user?.uid]);
+
   const generateBriefingRef = useRef(generateBriefing);
   useEffect(() => { generateBriefingRef.current = generateBriefing; });
 
   const hasAutoTriggeredRef = useRef(false);
-  const bgEnteredAtRef = useRef<number>(0); // バックグラウンドに入った時刻
+  const [jobChecked, setJobChecked] = useState(false);
 
-  // フォアグラウンド復帰時の回復処理
+  // 起動時ハイドレーション: 進行中 or 完成直後のジョブがあれば購読して復元する。
+  // プロセスキル後の再起動でも再生成せず続きから表示できる（①の根本修正）。
   useEffect(() => {
-    const sub = AppState.addEventListener('change', async (nextState) => {
-      if (nextState === 'background' || nextState === 'inactive') {
-        bgEnteredAtRef.current = Date.now();
-        return;
-      }
-      if (nextState !== 'active') return;
-
-      const st = useBriefingStore.getState();
-      const uid = getAuth().currentUser?.uid;
-      if (!uid) return;
-
-      // Phase 2: TTS がバックグラウンドで完了 → Firestore から取得
-      if (st.status === 'generating_audio' && st.script) {
-        try {
-          const snap = await getDoc(doc(db, 'users', uid));
-          const d = snap.data();
-          const updatedAt: number = d?.ttsUpdatedAt?.toMillis?.() ?? 0;
-          if (d?.ttsAudioUrl && updatedAt > Date.now() - 15 * 60 * 1000) {
-            useBriefingStore.getState().updateAudioUri(d.ttsAudioUrl);
-            useBriefingStore.getState().setStatus('ready');
+    if (!user?.uid || !googleTokenResolved) return;
+    const uid = user.uid;
+    let cancelled = false;
+    (async () => {
+      try {
+        const job = await getCurrentJob(uid);
+        if (cancelled || !job) return;
+        const ageMin = (Date.now() - (job.createdAt?.toMillis?.() ?? 0)) / 60000;
+        const active    = !['completed', 'error'].includes(job.status) && ageMin < 20;
+        const freshDone = job.status === 'completed' && ageMin < 60;
+        if ((active || freshDone) && !useBriefingStore.getState().script) {
+          hasAutoTriggeredRef.current = true;
+          if (!job.script) setStatus('generating_script');
+          attachJobListener(uid); // 初回スナップショットで現在の状態が即適用される
+          // For You タブ用のGoogleデータも背景で復元
+          if (!useBriefingStore.getState().googleData && googleAccessToken && !isExpoGo) {
+            googleDataService.fetchAll(googleAccessToken).then(setGoogleData).catch(() => {});
           }
-        } catch {}
-        return;
-      }
-
-      // Phase 1: スクリプト生成中にバックグラウンドへ。
-      // 3分以上バックグラウンドにいた = JSスレッドが停止してPromiseが死んだと判定 → 再起動。
-      // 3分未満なら元のリクエストが生きている可能性が高い（2重課金を避ける）。
-      if (st.status === 'generating_script') {
-        const bgDurationMs = Date.now() - bgEnteredAtRef.current;
-        if (bgDurationMs > 3 * 60 * 1000) {
-          useBriefingStore.getState().setStatus('idle');
-          hasAutoTriggeredRef.current = false;
         }
+      } finally {
+        if (!cancelled) setJobChecked(true);
       }
-    });
-    return () => sub.remove();
-  }, []);
+    })();
+    return () => { cancelled = true; };
+  }, [user?.uid, googleTokenResolved]);
 
   useEffect(() => {
-    if (AUTO_BRIEFING && status === 'idle' && googleTokenResolved && !hasAutoTriggeredRef.current) {
+    if (AUTO_BRIEFING && status === 'idle' && googleTokenResolved && jobChecked && !hasAutoTriggeredRef.current) {
       hasAutoTriggeredRef.current = true;
       generateBriefingRef.current();
     }
-  }, [status, googleTokenResolved]);
+  }, [status, googleTokenResolved, jobChecked]);
 
   const handlePlay = async () => {
     if (!script) return;

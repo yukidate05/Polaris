@@ -218,6 +218,97 @@ export async function generateNewsSegment(params: {
   return { chapters, dialogue, estimatedSeconds, interestText };
 }
 
+// Everything the briefing prompt needs, resolved from memory + external tools.
+// Shared by the legacy in-process path (generate below) and briefingJobService,
+// which sends the built prompt to the server-side worker.
+export interface PreparedBriefingInputs {
+  params:      import('./claudeService').BriefingPromptParams;
+  userContext: import('./memoryService').UserContext | null;
+  external:    ExternalToolData;
+}
+
+export async function prepareBriefingInputs(
+  data:         GoogleData,
+  userName:     string,
+  interests:    string[] = [],
+  isReturning:  boolean  = false,
+  uid?:         string,
+  sessionData?: SessionData | null,
+  hostIds?:     string[],
+  isPro?:       boolean,
+  language?:    string,
+  externalData?: ExternalToolData | null,
+  chatworkMyName?: string,
+  notionMyName?: string,
+): Promise<PreparedBriefingInputs> {
+  const currentHour = new Date().getHours();
+
+  // 記憶・外部ツールデータを並行読み込み（Proユーザーのみ外部ツール＋記憶を使用）
+  const emptyExternal: ExternalToolData = { slackMessages: null, slackTotalUnread: null, notionPages: null, teamsChats: null, chatworkMessages: null, chatworkTotalUnread: null };
+  const [rawContext, external] = await Promise.all([
+    uid ? memoryService.getContext(uid).catch(() => null) : Promise.resolve(null),
+    isPro
+      ? (externalData != null ? Promise.resolve(externalData) : fetchExternalToolData())
+      : Promise.resolve(emptyExternal),
+  ]);
+  const { notionPages, slackMessages, slackTotalUnread, teamsChats, chatworkMessages, chatworkTotalUnread } = external;
+  // 非ProユーザーはtopicStatuses（Slack/Chatwork/Notion由来）を除去してClaudeに渡さない
+  const userContext = rawContext && !isPro
+    ? { ...rawContext, topicStatuses: [] }
+    : rawContext;
+
+  return {
+    userContext,
+    external,
+    params: {
+      userName,
+      unreadCount:    data.unreadCount,
+      topEmails:      data.topEmails,
+      todayEvents:    data.todayEvents,
+      tomorrowEvents: data.tomorrowEvents,
+      interests,
+      currentHour,
+      isReturning,
+      userContext,
+      sessionData,
+      hostIds,
+      language,
+      notionPages:         notionPages
+        ? notionPages.filter(p => {
+            const t = Date.now() - new Date(p.lastEdited).getTime();
+            if (!(t >= 0 && t < 24 * 3600 * 1000)) return false;
+            // 自分自身が最終更新者のページは除外（自分の更新を「他者の行動」として報告させない）
+            if (notionMyName && p.lastEditedBy === notionMyName) return false;
+            return true;
+          })
+        : undefined,
+      slackMessages:       slackMessages ?? undefined,
+      slackTotalUnread:    slackTotalUnread ?? undefined,
+      teamsChats:          teamsChats ?? undefined,
+      chatworkMessages:    chatworkMessages ?? undefined,
+      chatworkTotalUnread: chatworkTotalUnread ?? undefined,
+      chatworkMyName:      chatworkMyName,
+      notionMyName:        notionMyName,
+    },
+  };
+}
+
+// Convert worker-generated raw chapters into a playable BriefingScript
+// (mirrors the shaping done at the end of briefingService.generate).
+export function buildScriptFromChapters(
+  rawChapters:      ChapterDraft[],
+  dialogue:         DialogueTurn[],
+  estimatedSeconds: number,
+  audioUri:         string | null,
+): BriefingScript {
+  const fullText = rawChapters.map((c) => c.text).join('　');
+  const times    = estimateChapterTimes(rawChapters.map((c) => c.text), estimatedSeconds);
+  const chapters: BriefingChapter[] = rawChapters.map((c, i) => ({
+    id: c.id, title: c.title, iconName: c.iconName, text: c.text, startSec: times[i],
+  }));
+  return { fullText, chapters, estimatedSeconds, audioUri, topic: '今日のブリーフィング', dialogue };
+}
+
 export const briefingService = {
   async generate(
     data:         GoogleData,
@@ -235,57 +326,17 @@ export const briefingService = {
     chatworkMyName?: string,
     notionMyName?: string,
   ): Promise<BriefingScript> {
-    const currentHour = new Date().getHours();
-
-    // 記憶・外部ツールデータを並行読み込み（Proユーザーのみ外部ツール＋記憶を使用）
-    const emptyExternal: ExternalToolData = { slackMessages: null, slackTotalUnread: null, notionPages: null, teamsChats: null, chatworkMessages: null, chatworkTotalUnread: null };
-    const [rawContext, { notionPages, slackMessages, slackTotalUnread, teamsChats, chatworkMessages, chatworkTotalUnread }] = await Promise.all([
-      uid ? memoryService.getContext(uid).catch(() => null) : Promise.resolve(null),
-      isPro
-        ? (externalData != null ? Promise.resolve(externalData) : fetchExternalToolData())
-        : Promise.resolve(emptyExternal),
-    ]);
-    // 非ProユーザーはtopicStatuses（Slack/Chatwork/Notion由来）を除去してClaudeに渡さない
-    const userContext = rawContext && !isPro
-      ? { ...rawContext, topicStatuses: [] }
-      : rawContext;
+    const prepared = await prepareBriefingInputs(
+      data, userName, interests, isReturning, uid, sessionData, hostIds, isPro,
+      language, externalData, chatworkMyName, notionMyName,
+    );
+    const { userContext } = prepared;
+    const { notionPages, slackMessages, slackTotalUnread, teamsChats, chatworkMessages, chatworkTotalUnread } = prepared.external;
 
     let rawChapters: ChapterDraft[];
     try {
       // ニュースキャストは generateNewsSegment() 側（two-phase: テーマ選定→深堀り）で別途生成される
-      const [briefingResult] = await Promise.all([
-        claudeService.generateBriefing({
-          userName,
-          unreadCount:    data.unreadCount,
-          topEmails:      data.topEmails,
-          todayEvents:    data.todayEvents,
-          tomorrowEvents: data.tomorrowEvents,
-          interests,
-          currentHour,
-          isReturning,
-          userContext,
-          sessionData,
-          hostIds,
-          language,
-          notionPages:         notionPages
-            ? notionPages.filter(p => {
-                const t = Date.now() - new Date(p.lastEdited).getTime();
-                if (!(t >= 0 && t < 24 * 3600 * 1000)) return false;
-                // 自分自身が最終更新者のページは除外（自分の更新を「他者の行動」として報告させない）
-                if (notionMyName && p.lastEditedBy === notionMyName) return false;
-                return true;
-              })
-            : undefined,
-          slackMessages:       slackMessages ?? undefined,
-          slackTotalUnread:    slackTotalUnread ?? undefined,
-          teamsChats:          teamsChats ?? undefined,
-          chatworkMessages:    chatworkMessages ?? undefined,
-          chatworkTotalUnread: chatworkTotalUnread ?? undefined,
-          chatworkMyName:      chatworkMyName,
-          notionMyName:        notionMyName,
-        }),
-      ]);
-
+      const briefingResult = await claudeService.generateBriefing(prepared.params);
       rawChapters = briefingResult.chapters;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

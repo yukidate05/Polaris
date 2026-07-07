@@ -20,6 +20,13 @@ service cloud.firestore {
       match /cache/{docId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
+
+      // Briefing generation jobs (users/{uid}/briefingJobs/current).
+      // The client submits jobs (status 'queued') and reads progress; the
+      // worker function writes results via the Admin SDK (bypasses rules).
+      match /briefingJobs/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
     }
 
     // Episodes: users can only access their own

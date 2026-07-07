@@ -30,6 +30,29 @@ export interface NewsThemeSelection {
   otherTopics: string[];
 }
 
+export interface BriefingPromptParams {
+  userName:       string;
+  unreadCount:    number;
+  topEmails:      { from: string; subject: string; snippet?: string }[];
+  todayEvents:    { title: string; startTime: string; location?: string }[];
+  tomorrowEvents: { title: string; startTime: string; location?: string }[];
+  interests:      string[];
+  currentHour:    number;
+  isReturning:    boolean;
+  userContext?:   import('./memoryService').UserContext | null;
+  sessionData?:   import('./sessionService').SessionData | null;
+  hostIds?:       string[];
+  language?:      string;
+  notionPages?:         import('./notionService').NotionPage[];
+  slackMessages?:       import('./slackService').SlackChannelMessages[];
+  slackTotalUnread?:    number;
+  teamsChats?:          import('./teamsService').TeamsChat[];
+  chatworkMessages?:    import('./chatworkService').ChatworkMessage[];
+  chatworkTotalUnread?: number;
+  chatworkMyName?:      string;
+  notionMyName?:        string;
+}
+
 function podcastName(hour: number): string {
   if (hour >= 5  && hour < 12) return 'Morning Briefing';
   if (hour >= 12 && hour < 17) return 'Daily Briefing';
@@ -252,28 +275,10 @@ Opening line: Aria welcomes ${userName} back, acknowledges their day, references
 }
 
 export const claudeService = {
-  async generateBriefing(params: {
-    userName:       string;
-    unreadCount:    number;
-    topEmails:      { from: string; subject: string; snippet?: string }[];
-    todayEvents:    { title: string; startTime: string; location?: string }[];
-    tomorrowEvents: { title: string; startTime: string; location?: string }[];
-    interests:      string[];
-    currentHour:    number;
-    isReturning:    boolean;
-    userContext?:   import('./memoryService').UserContext | null;
-    sessionData?:   import('./sessionService').SessionData | null;
-    hostIds?:       string[];
-    language?:      string;
-    notionPages?:         import('./notionService').NotionPage[];
-    slackMessages?:       import('./slackService').SlackChannelMessages[];
-    slackTotalUnread?:    number;
-    teamsChats?:          import('./teamsService').TeamsChat[];
-    chatworkMessages?:    import('./chatworkService').ChatworkMessage[];
-    chatworkTotalUnread?: number;
-    chatworkMyName?:      string;
-    notionMyName?:        string;
-  }): Promise<ClaudeBriefingResult> {
+  // Build the briefing prompt without calling the API — used both by
+  // generateBriefing() below (legacy/mock path) and by briefingJobService,
+  // which ships the prompt to the server-side worker.
+  async buildBriefingPrompt(params: BriefingPromptParams): Promise<{ prompt: string; systemPrompt: string }> {
     const { getSelectedHosts, DEFAULT_HOST_IDS } = await import('./voiceService');
     const [hostA, hostB] = getSelectedHosts(params.hostIds ?? DEFAULT_HOST_IDS);
     const lang     = LANG_NAMES[params.language ?? 'ja'] ?? 'Japanese';
@@ -471,7 +476,12 @@ Constraints:
 - ${hostA.name}'s tone: ${hostA.style} / ${hostB.name}'s tone: ${hostB.style}`;
 
     const sysPrompt = `You are an AI that generates engaging podcast dialogue scripts. Respond ENTIRELY in ${lang}. All dialogue, chapter titles, and content must be in ${lang} — including the "title" and "text" fields, which are written in English in the instructions above only as guidance for what to write, not as literal output. Output JSON only.`;
-    const text     = await callGemini(prompt, sysPrompt);
+    return { prompt, systemPrompt: sysPrompt };
+  },
+
+  async generateBriefing(params: BriefingPromptParams): Promise<ClaudeBriefingResult> {
+    const { prompt, systemPrompt } = await claudeService.buildBriefingPrompt(params);
+    const text     = await callGemini(prompt, systemPrompt);
     const chapters = parseChapters(text);
     const fullText = chapters.map((c) => c.text).join('　');
     return { chapters, fullText };

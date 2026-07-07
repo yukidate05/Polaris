@@ -1,15 +1,14 @@
-import { initializeApp } from 'firebase-admin/app';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { FieldValue } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { onRequest } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
 import { randomUUID } from 'crypto';
+import { db, GEMINI_KEY, checkSubscription, buildWavHeader, googleSynthesize } from './shared';
 
-initializeApp();
-export const db = getFirestore();
+export { db };
+export { briefingWorker } from './briefingWorker';
 
 // ── Secrets ──────────────────────────────────────────────────────────────────
-const GEMINI_KEY        = defineSecret('GEMINI_API_KEY');
 const NOTION_CLIENT_ID  = defineSecret('NOTION_CLIENT_ID');
 const NOTION_CLIENT_SECRET = defineSecret('NOTION_CLIENT_SECRET');
 const SLACK_CLIENT_ID     = defineSecret('SLACK_CLIENT_ID');
@@ -32,32 +31,6 @@ async function verifyUser(req: Parameters<Parameters<typeof onRequest>[0]>[0]): 
   } catch {
     return null;
   }
-}
-
-// ── Subscription check (server-authoritative) ─────────────────────────────────
-const TRIAL_DAYS         = 5;
-const FREE_COOLDOWN_DAYS = 3;
-
-async function checkSubscription(uid: string): Promise<{ allowed: boolean; message: string }> {
-  const snap = await db.collection('users').doc(uid).get();
-  const data = snap.data() ?? {};
-
-  if (data.plan === 'pro') return { allowed: true, message: 'pro' };
-
-  const firstOpenedAt: Date = data.firstOpenedAt?.toDate?.() ?? new Date();
-  const trialEnd = new Date(firstOpenedAt.getTime() + TRIAL_DAYS * 86_400_000);
-  if (new Date() < trialEnd) return { allowed: true, message: 'trial' };
-
-  const lastFreeUseAt: Date | null = data.lastFreeUseAt?.toDate?.() ?? null;
-  if (!lastFreeUseAt) return { allowed: true, message: 'free_first' };
-
-  const lastDay = new Date(lastFreeUseAt);
-  lastDay.setHours(0, 0, 0, 0);
-  const nextFreeDay = new Date(lastDay);
-  nextFreeDay.setDate(nextFreeDay.getDate() + FREE_COOLDOWN_DAYS);
-  if (new Date() < nextFreeDay) return { allowed: false, message: 'cooldown_active' };
-
-  return { allowed: true, message: 'free' };
 }
 
 // ── Rate limit check (per-user, per-endpoint) ─────────────────────────────────
@@ -141,29 +114,6 @@ export const gemini = onRequest(
 );
 
 // ── Gemini TTS proxy (multiSpeaker dialogue + preview) ───────────────────────
-function buildWavHeader(pcmLength: number): Buffer {
-  const sampleRate    = 24000;
-  const bitsPerSample = 16;
-  const channels      = 1;
-  const byteRate      = sampleRate * channels * (bitsPerSample / 8);
-  const blockAlign    = channels * (bitsPerSample / 8);
-  const buf           = Buffer.alloc(44);
-  buf.write('RIFF', 0, 'ascii');
-  buf.writeUInt32LE(36 + pcmLength, 4);
-  buf.write('WAVE', 8, 'ascii');
-  buf.write('fmt ', 12, 'ascii');
-  buf.writeUInt32LE(16, 16);
-  buf.writeUInt16LE(1, 20);
-  buf.writeUInt16LE(channels, 22);
-  buf.writeUInt32LE(sampleRate, 24);
-  buf.writeUInt32LE(byteRate, 28);
-  buf.writeUInt16LE(blockAlign, 32);
-  buf.writeUInt16LE(bitsPerSample, 34);
-  buf.write('data', 36, 'ascii');
-  buf.writeUInt32LE(pcmLength, 40);
-  return buf;
-}
-
 export const geminiTts = onRequest(
   { secrets: [GEMINI_KEY], cors: true, region: 'asia-northeast1', timeoutSeconds: 300, memory: '1GiB' },
   async (req, res) => {
@@ -277,39 +227,6 @@ export const geminiTts = onRequest(
 );
 
 // ── Google TTS proxy (single voice + dialogue) ────────────────────────────────
-const GOOGLE_TTS_SYNTH_URL = 'https://texttospeech.googleapis.com/v1/text:synthesize';
-// 言語ごとのフォールバック音声。ja以外はカバレッジの広いStandard系を使用（Neural2は言語によって未提供のため）。
-const GOOGLE_VOICES_BY_LANG: Record<string, { A: { languageCode: string; name: string; ssmlGender: 'FEMALE' | 'MALE' }; B: { languageCode: string; name: string; ssmlGender: 'FEMALE' | 'MALE' } }> = {
-  ja: { A: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B',  ssmlGender: 'FEMALE' }, B: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-C',  ssmlGender: 'MALE' } },
-  en: { A: { languageCode: 'en-US', name: 'en-US-Standard-F', ssmlGender: 'FEMALE' }, B: { languageCode: 'en-US', name: 'en-US-Standard-D', ssmlGender: 'MALE' } },
-  zh: { A: { languageCode: 'cmn-CN', name: 'cmn-CN-Standard-A', ssmlGender: 'FEMALE' }, B: { languageCode: 'cmn-CN', name: 'cmn-CN-Standard-B', ssmlGender: 'MALE' } },
-  ko: { A: { languageCode: 'ko-KR', name: 'ko-KR-Standard-A', ssmlGender: 'FEMALE' }, B: { languageCode: 'ko-KR', name: 'ko-KR-Standard-C', ssmlGender: 'MALE' } },
-  es: { A: { languageCode: 'es-ES', name: 'es-ES-Standard-A', ssmlGender: 'FEMALE' }, B: { languageCode: 'es-ES', name: 'es-ES-Standard-B', ssmlGender: 'MALE' } },
-  fr: { A: { languageCode: 'fr-FR', name: 'fr-FR-Standard-A', ssmlGender: 'FEMALE' }, B: { languageCode: 'fr-FR', name: 'fr-FR-Standard-B', ssmlGender: 'MALE' } },
-  de: { A: { languageCode: 'de-DE', name: 'de-DE-Standard-A', ssmlGender: 'FEMALE' }, B: { languageCode: 'de-DE', name: 'de-DE-Standard-B', ssmlGender: 'MALE' } },
-  pt: { A: { languageCode: 'pt-BR', name: 'pt-BR-Standard-A', ssmlGender: 'FEMALE' }, B: { languageCode: 'pt-BR', name: 'pt-BR-Standard-B', ssmlGender: 'MALE' } },
-  it: { A: { languageCode: 'it-IT', name: 'it-IT-Standard-A', ssmlGender: 'FEMALE' }, B: { languageCode: 'it-IT', name: 'it-IT-Standard-B', ssmlGender: 'MALE' } },
-};
-
-async function googleSynthesize(text: string, speaker: 'A' | 'B', apiKey: string, language: string): Promise<Buffer> {
-  const voices = GOOGLE_VOICES_BY_LANG[language] ?? GOOGLE_VOICES_BY_LANG.ja;
-  const resp = await fetch(`${GOOGLE_TTS_SYNTH_URL}?key=${apiKey}`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      input:       { text },
-      voice:       voices[speaker],
-      audioConfig: { audioEncoding: 'MP3', speakingRate: 1.05, pitch: 0.0 },
-    }),
-  });
-  if (!resp.ok) {
-    const body = await resp.text().catch(() => '');
-    throw new Error(`gcloud-tts:${resp.status} ${body.slice(0, 100)}`);
-  }
-  const { audioContent } = await resp.json() as { audioContent: string };
-  return Buffer.from(audioContent, 'base64');
-}
-
 export const googleTts = onRequest(
   { secrets: [GEMINI_KEY], cors: true, region: 'asia-northeast1', timeoutSeconds: 120 },
   async (req, res) => {
