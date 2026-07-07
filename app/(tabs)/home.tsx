@@ -20,6 +20,7 @@ import { googleDataService, MOCK_GOOGLE_DATA } from '@services/googleDataService
 import { briefingService, fetchExternalToolData, generateNewsSegment, type NewsSegmentData, type ExternalStats, type ExternalToolData } from '@services/briefingService';
 import { geminiTtsService } from '@services/geminiTtsService';
 import { googleTtsService } from '@services/googleTtsService';
+import { getTransitionAudioUri } from '@services/transitionVoiceService';
 import { sessionService } from '@services/sessionService';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@lib/firebase';
@@ -193,7 +194,7 @@ export default function HomeScreen() {
         }
       }
       const sc = await briefingService.generate(
-        data, firstName, interests, hasPlayed, user?.uid ?? undefined, sessionData, selectedHostIds, userIsPro, lang, isMockData, externalDataRef.current, SKIP_TTS, true, chatworkMyName, notionMyName
+        data, firstName, interests, hasPlayed, user?.uid ?? undefined, sessionData, selectedHostIds, userIsPro, lang, isMockData, externalDataRef.current, SKIP_TTS, chatworkMyName, notionMyName
       );
       setScript(sc); // → status: 'ready'、音声なしでも再生可能な状態に
       if (user?.uid) subscriptionService.recordGeneration(user.uid);
@@ -210,6 +211,7 @@ export default function HomeScreen() {
           hostIds:       selectedHostIds ?? undefined,
           language:      lang,
           topEmails:     data.topEmails,
+          externalData:  externalDataRef.current,
         }).catch(e => { console.error('[home] news text gen failed:', e); return null; });
       }
 
@@ -221,7 +223,7 @@ export default function HomeScreen() {
           updateAudioUri(audioUri);
         } catch {
           try {
-            const audioUri = await googleTtsService.generateDialogueAudio(sc.dialogue);
+            const audioUri = await googleTtsService.generateDialogueAudio(sc.dialogue, lang);
             updateAudioUri(audioUri);
           } catch {
             console.warn('[home] Both TTS services failed, falling back to device TTS');
@@ -241,16 +243,13 @@ export default function HomeScreen() {
               audioUri: null,
             });
 
-            // 遷移アナウンス（Google TTS ~5s）→ 即セット（ブリーフィング終了後すぐ再生できるよう）
-            const transitionText = lang === 'ja'
-              ? `この後は${firstName}さんの興味のある${newsText.interestText}についてのニュースをお届けします！`
-              : `Coming up next — the latest news on ${newsText.interestText}, just for you, ${firstName}!`;
-            const transUri = await googleTtsService.generateAudio(transitionText).catch(() => null);
+            // 遷移アナウンス（言語ごとに事前生成済みのAria音声・固定フレーズ）→ 即セット
+            const transUri = await getTransitionAudioUri(lang).catch(() => null);
             setTransitionAudioUri(transUri);
 
             // ニュースTTS（~3min）→ バックグラウンドで生成、完了次第セット（ブリーフィング再生中に完了する想定）
             geminiTtsService.generateDialogueAudio(newsText.dialogue, selectedHostIds ?? undefined)
-              .catch(async () => googleTtsService.generateDialogueAudio(newsText.dialogue).catch(() => null))
+              .catch(async () => googleTtsService.generateDialogueAudio(newsText.dialogue, lang).catch(() => null))
               .then(newsUri => {
                 if (newsUri) {
                   setNewsAudioUri(newsUri);
@@ -432,7 +431,7 @@ export default function HomeScreen() {
           {/* Header */}
           <View style={[s.header, { marginTop: insets.top + 6 }]} pointerEvents="box-none">
             <Text style={s.appTitle}>Polaris</Text>
-            <TouchableOpacity onPress={() => router.push('/(tabs)/settings')} style={s.menuBtn} accessibilityLabel="設定を開く">
+            <TouchableOpacity onPress={() => router.push('/(tabs)/settings')} style={s.menuBtn} accessibilityLabel={t('open_settings_a11y')}>
               <Ionicons name="menu" size={20} color="#fff" />
             </TouchableOpacity>
           </View>
@@ -493,11 +492,11 @@ export default function HomeScreen() {
             <View style={s.errorBanner}>
               <Ionicons name="alert-circle-outline" size={20} color="#FF6464" />
               <View style={{ flex: 1 }}>
-                <Text style={s.errorTitle}>生成に失敗しました</Text>
+                <Text style={s.errorTitle}>{t('generation_failed')}</Text>
                 {error ? <Text style={s.errorSub} selectable>{error.slice(0, 200)}</Text> : null}
               </View>
               <TouchableOpacity onPress={generateBriefing} style={s.retryBtn}>
-                <Text style={s.retryBtnText}>再試行</Text>
+                <Text style={s.retryBtnText}>{t('retry')}</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -528,9 +527,9 @@ export default function HomeScreen() {
           {isGenerating && (
             <View style={s.genSteps}>
               {([
-                { key: 'fetching',           label: 'データ取得',       hint: '約1分' },
-                { key: 'generating_script',  label: 'スクリプト生成',   hint: '約2分' },
-                { key: 'generating_audio',   label: '音声生成',         hint: '約2分' },
+                { key: 'fetching',           label: t('gen_step_fetching'), hint: t('gen_hint_1min') },
+                { key: 'generating_script',  label: t('gen_step_script'),   hint: t('gen_hint_2min') },
+                { key: 'generating_audio',   label: t('gen_step_audio'),    hint: t('gen_hint_2min') },
               ] as const).map((step, i) => {
                 const stepOrder = { fetching: 0, generating_script: 1, generating_audio: 2 } as const;
                 const currentOrder = stepOrder[status as keyof typeof stepOrder] ?? 0;
@@ -565,7 +564,7 @@ export default function HomeScreen() {
               style={s.tabRefresh}
               onPress={generateBriefing}
               disabled={isGenerating}
-              accessibilityLabel="ブリーフィングを更新"
+              accessibilityLabel={t('refresh_briefing_a11y')}
             >
               <Ionicons name="refresh" size={18} color={isGenerating ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.45)'} />
             </TouchableOpacity>

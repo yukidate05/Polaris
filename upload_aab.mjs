@@ -4,7 +4,7 @@ import { google } from 'googleapis';
 import fs from 'fs';
 import path from 'path';
 
-const SERVICE_ACCOUNT_KEY = 'C:/Users/yukid/Downloads/polaris-app-yukid-458b1ff906c2.json';
+const SERVICE_ACCOUNT_KEY = path.join(import.meta.dirname, 'polaris-app-yukid-458b1ff906c2.json');
 const PACKAGE_NAME = 'com.yukid.polaris';
 const TRACK = 'internal';
 

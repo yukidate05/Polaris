@@ -13,8 +13,10 @@ import type { NewsSegment } from '@stores/briefingStore';
 import { useAuthStore } from '@stores/authStore';
 import { speechService, SPEECH_RATES, type SpeechRate } from '@services/speechService';
 import { sessionService } from '@services/sessionService';
+import { bgmService } from '@services/bgmService';
 import { Colors } from '@constants/colors';
 import type { BriefingChapter } from '@services/briefingService';
+import { useT } from '@/i18n';
 
 const CURR_LINE_H  = 34;
 const CURR_LINES   = 5;
@@ -32,11 +34,12 @@ function chapterAtTime(chapters: BriefingChapter[], sec: number): BriefingChapte
   return active;
 }
 
-type PlayPhase = 'briefing' | 'transition' | 'news';
+type PlayPhase = 'briefing' | 'transition' | 'bridge' | 'news';
 
 export default function PlayerScreen() {
   const { script, newsSegment, transitionAudioUri, newsStatus } = useBriefingStore();
   const { user } = useAuthStore();
+  const t = useT();
 
   const [playPhase,          setPlayPhase]          = useState<PlayPhase>('briefing');
   const [isPlaying,          setIsPlaying]          = useState(false);
@@ -104,9 +107,13 @@ export default function PlayerScreen() {
     return () => sub.remove();
   }, []);
 
-  // フェーズごとの音声URI・データ
+  // 遷移セリフ・BGMブリッジ中は共通の専用UI（進捗バー非表示・オーバーレイ表示）を使う
+  const isInterstitial = playPhase === 'transition' || playPhase === 'bridge';
+
+  // フェーズごとの音声URI・データ（bridgeはBGMのみのためstore由来のURIを持たない）
   const currentAudioUri = playPhase === 'briefing' ? script?.audioUri
     : playPhase === 'transition' ? transitionAudioUri
+    : playPhase === 'bridge' ? null
     : newsSegment?.audioUri;
   const isAudio = !!currentAudioUri;
 
@@ -265,8 +272,8 @@ export default function PlayerScreen() {
               setCurrentSec(totalSecRef.current);
               setBriefingCompleted(true);
               if (playerRef.current) { lastSeekRef.current = Date.now(); playerRef.current.seekTo(0).catch(() => {}); }
-            } else if (phase === 'transition' && newsUri) {
-              setPlayPhase('news');
+            } else if (phase === 'transition') {
+              setPlayPhase('bridge');
             } else {
               // 全フェーズ終了。プレイヤーを破棄せず先頭にシーク（画面上でそのまま再再生可能にする）
               completedNaturallyRef.current = true;
@@ -299,6 +306,46 @@ export default function PlayerScreen() {
         if (playerRef.current) { playerRef.current.pause(); playerRef.current.remove(); playerRef.current = null; }
         clearInterval(timerRef.current!);
       }
+    };
+  }, [playPhase]);
+
+  // ── ブリッジフェーズ（遷移セリフ終了後〜ニュース開始前のBGM）───────────────
+  // ホーム画面の生成待ちBGMと同じ仕組みを流用。最低10秒流し、ニュース音声の
+  // 準備ができ次第フェードアウトしてニュースフェーズへ。
+  useEffect(() => {
+    if (playPhase !== 'bridge') return;
+    let cancelled = false;
+    let advanceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    setIsPlaying(true);
+    bgmService.play();
+
+    const MIN_BRIDGE_MS = 10_000;
+    const startedAt = Date.now();
+
+    async function finish() {
+      if (cancelled) return;
+      await bgmService.fadeOutAndStop();
+      if (cancelled) return;
+      setIsPlaying(false);
+      setPlayPhase('news');
+    }
+
+    function checkAdvance() {
+      if (cancelled) return;
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= MIN_BRIDGE_MS && newsAudioUriRef.current) {
+        finish();
+      } else {
+        advanceTimer = setTimeout(checkAdvance, elapsed < MIN_BRIDGE_MS ? MIN_BRIDGE_MS - elapsed : 500);
+      }
+    }
+    advanceTimer = setTimeout(checkAdvance, MIN_BRIDGE_MS);
+
+    return () => {
+      cancelled = true;
+      if (advanceTimer) clearTimeout(advanceTimer);
+      bgmService.stop();
     };
   }, [playPhase]);
 
@@ -373,9 +420,9 @@ export default function PlayerScreen() {
       <View style={styles.bg}>
         <SafeAreaView style={styles.safe}>
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>ホーム画面からブリーフィングを生成してください</Text>
+            <Text style={styles.emptyText}>{t('player_empty_msg')}</Text>
             <TouchableOpacity onPress={() => router.back()} style={styles.emptyBtn}>
-              <Text style={styles.emptyBtnText}>戻る</Text>
+              <Text style={styles.emptyBtnText}>{t('back')}</Text>
             </TouchableOpacity>
           </View>
         </SafeAreaView>
@@ -390,30 +437,30 @@ export default function PlayerScreen() {
 
         {/* Nav */}
         <View style={styles.nav}>
-          <TouchableOpacity onPress={() => { cleanup(); router.back(); }} style={styles.navBtn} accessibilityLabel="閉じる">
+          <TouchableOpacity onPress={() => { cleanup(); router.back(); }} style={styles.navBtn} accessibilityLabel={t('a11y_close')}>
             <Ionicons name="chevron-down" size={26} color="rgba(255,255,255,0.8)" />
           </TouchableOpacity>
           <View style={styles.navCenter}>
             <Text style={styles.navTitle}>Daily Brief</Text>
             <Text style={styles.navSub}>
-              {new Date().toLocaleDateString(undefined, { month: 'long', day: 'numeric' })} • {Math.ceil(totalSec / 60)}分
+              {new Date().toLocaleDateString(undefined, { month: 'long', day: 'numeric' })} • {Math.ceil(totalSec / 60)}{t('minutes')}
             </Text>
           </View>
           <View style={{ width: 44 }} />
         </View>
 
-        {/* ── Transition overlay（ニュースキャスト開始前アナウンス中）─────── */}
-        {playPhase === 'transition' && (
+        {/* ── Transition overlay（遷移セリフ〜BGMブリッジ中）─────────────── */}
+        {isInterstitial && (
           <View style={styles.transitionOverlay}>
             <Text style={styles.transitionText}>
-              {newsSegment?.interestText ? `${newsSegment.interestText}\nニュースキャスト` : 'ニュースキャスト'}
+              {t('news_briefing_label')}
             </Text>
-            <Text style={styles.transitionSub}>準備中...</Text>
+            <Text style={styles.transitionSub}>{t('status_idle')}</Text>
           </View>
         )}
 
         {/* ── Subtitle area: scrollable with 3-slot visual ─────────────────── */}
-        {playPhase !== 'transition' && <View style={styles.subtitleArea}>
+        {!isInterstitial && <View style={styles.subtitleArea}>
           <ScrollView
             ref={scrollViewRef}
             style={styles.subtitleScroll}
@@ -483,7 +530,7 @@ export default function PlayerScreen() {
               <TouchableOpacity
                 onPress={() => setSyncOffset(v => Math.max(parseFloat((v - 0.5).toFixed(1)), -4))}
                 style={styles.syncBtn}
-                accessibilityLabel="字幕を遅らせる"
+                accessibilityLabel={t('a11y_subtitle_delay')}
               >
                 <Text style={styles.syncBtnText}>−</Text>
               </TouchableOpacity>
@@ -491,7 +538,7 @@ export default function PlayerScreen() {
               <TouchableOpacity
                 onPress={() => setSyncOffset(v => Math.min(parseFloat((v + 0.5).toFixed(1)), 2))}
                 style={styles.syncBtn}
-                accessibilityLabel="字幕を早める"
+                accessibilityLabel={t('a11y_subtitle_advance')}
               >
                 <Text style={styles.syncBtnText}>＋</Text>
               </TouchableOpacity>
@@ -534,21 +581,21 @@ export default function PlayerScreen() {
             </View>
           </ScrollView>
 
-          {/* Playback controls (transition中は下の専用コントロールを使う) */}
-          {playPhase !== 'transition' && (
+          {/* Playback controls (transition/bridge中は下の専用コントロールを使う) */}
+          {!isInterstitial && (
             <View style={styles.controls}>
-              <TouchableOpacity onPress={cycleRate} style={styles.sideControl} accessibilityLabel={`再生速度 ${rate}倍`}>
+              <TouchableOpacity onPress={cycleRate} style={styles.sideControl} accessibilityLabel={t('a11y_playback_rate', { rate })}>
                 <Text style={styles.rateText}>{rate}x</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => handleSkip(-15)} style={styles.skipBtn} accessibilityLabel="15秒戻す">
+              <TouchableOpacity onPress={() => handleSkip(-15)} style={styles.skipBtn} accessibilityLabel={t('a11y_skip_back')}>
                 <Ionicons name="play-back" size={20} color="rgba(255,255,255,0.6)" />
                 <Text style={styles.skipLabel}>15</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={handlePlayPause} style={styles.playBtn} activeOpacity={0.85} accessibilityLabel={isPlaying ? '一時停止' : '再生'}>
+              <TouchableOpacity onPress={handlePlayPause} style={styles.playBtn} activeOpacity={0.85} accessibilityLabel={isPlaying ? t('a11y_pause') : t('a11y_play_action')}>
                 <Ionicons name={isPlaying ? 'pause' : 'play'} size={30} color="#0A0A0A"
                   style={!isPlaying ? { marginLeft: 4 } : undefined} />
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => handleSkip(15)} style={styles.skipBtn} accessibilityLabel="15秒進む">
+              <TouchableOpacity onPress={() => handleSkip(15)} style={styles.skipBtn} accessibilityLabel={t('a11y_skip_forward')}>
                 <Ionicons name="play-forward" size={20} color="rgba(255,255,255,0.6)" />
                 <Text style={styles.skipLabel}>15</Text>
               </TouchableOpacity>
@@ -558,12 +605,16 @@ export default function PlayerScreen() {
 
         </View>
 
-        {/* transition フェーズ中もコントロールを表示 */}
-        {playPhase === 'transition' && (
+        {/* transition/bridge フェーズ中もコントロールを表示（bridge中は再生中表示のみ・操作不可） */}
+        {isInterstitial && (
           <View style={styles.controls}>
             <View style={styles.sideControl} />
             <View style={styles.skipBtn} />
-            <TouchableOpacity onPress={handlePlayPause} style={styles.playBtn} activeOpacity={0.85}>
+            <TouchableOpacity
+              onPress={playPhase === 'transition' ? handlePlayPause : undefined}
+              style={styles.playBtn}
+              activeOpacity={playPhase === 'transition' ? 0.85 : 1}
+            >
               <Ionicons name={isPlaying ? 'pause' : 'play'} size={30} color="#0A0A0A"
                 style={!isPlaying ? { marginLeft: 4 } : undefined} />
             </TouchableOpacity>

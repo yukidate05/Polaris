@@ -278,18 +278,27 @@ export const geminiTts = onRequest(
 
 // ── Google TTS proxy (single voice + dialogue) ────────────────────────────────
 const GOOGLE_TTS_SYNTH_URL = 'https://texttospeech.googleapis.com/v1/text:synthesize';
-const GOOGLE_VOICES = {
-  A: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B', ssmlGender: 'FEMALE' },
-  B: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-C', ssmlGender: 'MALE'   },
-} as const;
+// 言語ごとのフォールバック音声。ja以外はカバレッジの広いStandard系を使用（Neural2は言語によって未提供のため）。
+const GOOGLE_VOICES_BY_LANG: Record<string, { A: { languageCode: string; name: string; ssmlGender: 'FEMALE' | 'MALE' }; B: { languageCode: string; name: string; ssmlGender: 'FEMALE' | 'MALE' } }> = {
+  ja: { A: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B',  ssmlGender: 'FEMALE' }, B: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-C',  ssmlGender: 'MALE' } },
+  en: { A: { languageCode: 'en-US', name: 'en-US-Standard-F', ssmlGender: 'FEMALE' }, B: { languageCode: 'en-US', name: 'en-US-Standard-D', ssmlGender: 'MALE' } },
+  zh: { A: { languageCode: 'cmn-CN', name: 'cmn-CN-Standard-A', ssmlGender: 'FEMALE' }, B: { languageCode: 'cmn-CN', name: 'cmn-CN-Standard-B', ssmlGender: 'MALE' } },
+  ko: { A: { languageCode: 'ko-KR', name: 'ko-KR-Standard-A', ssmlGender: 'FEMALE' }, B: { languageCode: 'ko-KR', name: 'ko-KR-Standard-C', ssmlGender: 'MALE' } },
+  es: { A: { languageCode: 'es-ES', name: 'es-ES-Standard-A', ssmlGender: 'FEMALE' }, B: { languageCode: 'es-ES', name: 'es-ES-Standard-B', ssmlGender: 'MALE' } },
+  fr: { A: { languageCode: 'fr-FR', name: 'fr-FR-Standard-A', ssmlGender: 'FEMALE' }, B: { languageCode: 'fr-FR', name: 'fr-FR-Standard-B', ssmlGender: 'MALE' } },
+  de: { A: { languageCode: 'de-DE', name: 'de-DE-Standard-A', ssmlGender: 'FEMALE' }, B: { languageCode: 'de-DE', name: 'de-DE-Standard-B', ssmlGender: 'MALE' } },
+  pt: { A: { languageCode: 'pt-BR', name: 'pt-BR-Standard-A', ssmlGender: 'FEMALE' }, B: { languageCode: 'pt-BR', name: 'pt-BR-Standard-B', ssmlGender: 'MALE' } },
+  it: { A: { languageCode: 'it-IT', name: 'it-IT-Standard-A', ssmlGender: 'FEMALE' }, B: { languageCode: 'it-IT', name: 'it-IT-Standard-B', ssmlGender: 'MALE' } },
+};
 
-async function googleSynthesize(text: string, speaker: 'A' | 'B', apiKey: string): Promise<Buffer> {
+async function googleSynthesize(text: string, speaker: 'A' | 'B', apiKey: string, language: string): Promise<Buffer> {
+  const voices = GOOGLE_VOICES_BY_LANG[language] ?? GOOGLE_VOICES_BY_LANG.ja;
   const resp = await fetch(`${GOOGLE_TTS_SYNTH_URL}?key=${apiKey}`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       input:       { text },
-      voice:       GOOGLE_VOICES[speaker],
+      voice:       voices[speaker],
       audioConfig: { audioEncoding: 'MP3', speakingRate: 1.05, pitch: 0.0 },
     }),
   });
@@ -309,10 +318,12 @@ export const googleTts = onRequest(
     const uid = await verifyUser(req);
     if (!uid) { res.status(401).send('Unauthorized'); return; }
 
-    const { text, dialogue } = req.body as {
+    const { text, dialogue, language } = req.body as {
       text?:     string;
       dialogue?: { speaker: 'A' | 'B'; text: string }[];
+      language?: string;
     };
+    const lang = language ?? 'ja';
 
     if (!text && !dialogue?.length) {
       res.status(400).send('Missing text or dialogue');
@@ -330,7 +341,7 @@ export const googleTts = onRequest(
     const apiKey = GEMINI_KEY.value();
 
     if (text) {
-      const mp3 = await googleSynthesize(text, 'A', apiKey);
+      const mp3 = await googleSynthesize(text, 'A', apiKey, lang);
       res.json({ audioBase64: mp3.toString('base64'), mimeType: 'audio/mp3' });
       return;
     }
@@ -340,7 +351,7 @@ export const googleTts = onRequest(
     const segments: Buffer[] = [];
     for (let i = 0; i < dialogue!.length; i += BATCH) {
       const batch   = dialogue!.slice(i, i + BATCH);
-      const results = await Promise.all(batch.map(t => googleSynthesize(t.text, t.speaker, apiKey)));
+      const results = await Promise.all(batch.map(t => googleSynthesize(t.text, t.speaker, apiKey, lang)));
       segments.push(...results);
     }
     res.json({ audioBase64: Buffer.concat(segments).toString('base64'), mimeType: 'audio/mp3' });

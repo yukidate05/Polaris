@@ -83,17 +83,19 @@ interface GmailMessageResponse {
 }
 
 async function fetchEmails(token: string): Promise<{ unreadCount: number; topEmails: EmailSummary[] }> {
-  // 当日受信 + メインタブのみ（プロモ・迷惑メール除外）
-  const today = new Date();
-  const dateStr = `${today.getFullYear()}/${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}`;
-  const q = encodeURIComponent(`after:${dateStr} category:primary`);
+  // 直近24時間 + メインタブのみ（プロモ・迷惑メール除外）
+  // 日付境界（after:YYYY/MM/DDや「今日0時」固定）だと、日付が変わる前の夜間メールが
+  // その日にも翌日にも一切拾われず恒久的に取りこぼされるため、Unix秒指定のafter:で
+  // ローリング24時間窓にする（タイムゾーンの曖昧さも併せて解消される）
+  const afterEpochSec = Math.floor((Date.now() - 24 * 60 * 60 * 1000) / 1000);
+  const q = encodeURIComponent(`after:${afterEpochSec} category:primary`);
 
   const list = await gGet<GmailListResponse>(
     `${GMAIL_BASE}/messages?maxResults=50&q=${q}&fields=messages(id),resultSizeEstimate`,
     token
   );
 
-  console.log('[gmail] today emails:', list.messages?.length);
+  console.log('[gmail] last 24h emails:', list.messages?.length);
   const unreadCount = list.messages?.length ?? 0;
   const messages = list.messages ?? [];
 

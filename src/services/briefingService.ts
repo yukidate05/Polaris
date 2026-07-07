@@ -157,25 +157,48 @@ export async function generateNewsSegment(params: {
   hostIds?:      string[];
   language?:     string;
   topEmails?:    { from: string; subject: string }[];
+  externalData?: ExternalToolData | null;
 }): Promise<NewsSegmentData> {
   const lang = params.language ?? 'ja';
 
   const userContext = await memoryService.getContext(params.uid).catch(() => null);
+  // 蓄積された記憶から推定した興味関心があればそちらを優先。
+  // 無ければ（初回〜数回目の利用）今日のメール差出人・件名・チャット内容からその場で推定し、
+  // それでも根拠が無ければ設定のデフォルトにフォールバックする
+  let effectiveInterests = userContext?.inferredInterests?.length ? userContext.inferredInterests : null;
+  if (!effectiveInterests) {
+    const coldStart = await memoryService.inferColdStartInterests({
+      topEmails:        params.topEmails,
+      slackMessages:    params.externalData?.slackMessages    ?? null,
+      notionPages:      params.externalData?.notionPages      ?? null,
+      chatworkMessages: params.externalData?.chatworkMessages ?? null,
+    }).catch(() => []);
+    effectiveInterests = coldStart.length ? coldStart : params.interests;
+  }
+
   const cached = await getCachedNews(params.uid, lang, params.targetMinutes);
   let rawChapters: ChapterDraft[];
   if (cached) {
     console.log('[newsSegment] using cached news');
     rawChapters = cached;
   } else {
+    const theme = await claudeService.selectNewsTheme({
+      userName:   params.userName,
+      interests:  effectiveInterests,
+      language:   params.language,
+      userContext,
+      topEmails:  params.topEmails,
+    });
     const result = await claudeService.generateNewsCast({
       userName:      params.userName,
-      interests:     params.interests,
+      interests:     effectiveInterests,
       currentHour:   new Date().getHours(),
       hostIds:       params.hostIds,
       language:      params.language,
       userContext,
       topEmails:     params.topEmails,
       targetMinutes: params.targetMinutes,
+      theme,
     });
     rawChapters = result.chapters;
     cacheNews(params.uid, lang, rawChapters, params.targetMinutes).catch(() => {});
@@ -190,7 +213,7 @@ export async function generateNewsSegment(params: {
   }));
 
   const dialogue = splitTurns(rawChapters.flatMap(c => c.dialogue ?? []));
-  const interestText = params.interests.slice(0, 3).join('・') || 'テクノロジー・ビジネス';
+  const interestText = effectiveInterests.slice(0, 3).join(', ') || 'technology, business';
 
   return { chapters, dialogue, estimatedSeconds, interestText };
 }
@@ -209,7 +232,6 @@ export const briefingService = {
     isMockData?:  boolean,
     externalData?: ExternalToolData | null,
     skipAudio?:   boolean,
-    skipNews?:    boolean,
     chatworkMyName?: string,
     notionMyName?: string,
   ): Promise<BriefingScript> {
@@ -230,34 +252,8 @@ export const briefingService = {
 
     let rawChapters: ChapterDraft[];
     try {
-      // ブリーフィング + Pro向けニュースキャストを並行生成（当日キャッシュあれば再利用）
-      // isMockData時はニュースをスキップ（テスト時のAPI課金を防ぐ）
-      const lang = language ?? 'ja';
-      const newsPromise = isPro && !isMockData && !skipNews
-        ? (async () => {
-            if (uid) {
-              const cached = await getCachedNews(uid, lang);
-              if (cached) {
-                console.log('[briefing] using cached news');
-                return { chapters: cached, fullText: cached.map(c => c.text).join('　') };
-              }
-            }
-            try {
-              const result = await claudeService.generateNewsCast({
-                userName, interests, currentHour, hostIds, language,
-                userContext,
-                topEmails: data.topEmails,
-              });
-              if (uid) cacheNews(uid, lang, result.chapters).catch(() => {});
-              return result;
-            } catch (e) {
-              console.error('[briefing] newsCast failed:', e);
-              return null;
-            }
-          })()
-        : Promise.resolve(null);
-
-      const [briefingResult, newsResult] = await Promise.all([
+      // ニュースキャストは generateNewsSegment() 側（two-phase: テーマ選定→深堀り）で別途生成される
+      const [briefingResult] = await Promise.all([
         claudeService.generateBriefing({
           userName,
           unreadCount:    data.unreadCount,
@@ -288,13 +284,9 @@ export const briefingService = {
           chatworkMyName:      chatworkMyName,
           notionMyName:        notionMyName,
         }),
-        newsPromise,
       ]);
 
-      rawChapters = [
-        ...briefingResult.chapters,
-        ...(newsResult?.chapters ?? []),
-      ];
+      rawChapters = briefingResult.chapters;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[briefing] script generation failed:', msg.slice(0, 400));

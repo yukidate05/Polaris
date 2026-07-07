@@ -6,6 +6,7 @@ import { router } from 'expo-router';
 import { useAuthStore } from '@stores/authStore';
 import { subscriptionService, type AccessStatus } from '@services/subscriptionService';
 import { checkIsPro } from '@lib/revenuecat';
+import { useT } from '@/i18n';
 
 function urgencyLevel(status: AccessStatus): 'normal' | 'warning' | 'critical' {
   if (status.reason === 'trial') {
@@ -21,25 +22,25 @@ function urgencyLevel(status: AccessStatus): 'normal' | 'warning' | 'critical' {
   return 'normal';
 }
 
-function bannerText(status: AccessStatus): { label: string; icon: string } {
+function bannerText(status: AccessStatus, t: ReturnType<typeof useT>): { label: string; icon: string } {
   if (status.reason === 'trial') {
     const d = status.trialDaysLeft;
     return {
       icon:  d <= 1 ? 'alert-circle-outline' : 'time-outline',
-      label: d <= 1 ? 'トライアルは本日まで' : `トライアル残り ${d} 日`,
+      label: d <= 1 ? t('trial_ends_today') : t('trial_days_left', { n: d }),
     };
   }
   if (status.reason === 'cooldown_active') {
     const d = status.cooldownDaysLeft;
     return {
       icon:  'time-outline',
-      label: d <= 1 ? '明日また使えます' : `再生可能まで残り ${d} 日`,
+      label: d <= 1 ? t('cooldown_tomorrow') : t('cooldown_days_left', { n: d }),
     };
   }
   // free_cooldown = can use now
   return {
     icon:  'radio-button-on-outline',
-    label: 'あと 1 回生成可能',
+    label: t('one_generation_left'),
   };
 }
 
@@ -68,6 +69,7 @@ const COLORS = {
 } as const;
 
 export function SubscriptionStatusBanner() {
+  const t = useT();
   const { user, profile } = useAuthStore();
   const [status, setStatus] = useState<AccessStatus | null>(null);
   const [isPro,  setIsPro]  = useState(false);
@@ -115,7 +117,7 @@ export function SubscriptionStatusBanner() {
 
   const level  = urgencyLevel(status);
   const colors = COLORS[level];
-  const { label, icon } = bannerText(status);
+  const { label, icon } = bannerText(status, t);
 
   return (
     <Animated.View style={[styles.wrapper, { opacity: fadeAnim }]}>

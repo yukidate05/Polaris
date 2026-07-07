@@ -24,11 +24,12 @@ export interface TopicStatus {
 }
 
 export interface UserContext {
-  inferredRole:     string;
-  frequentContacts: ContactMemory[];
-  recentTopics:     string[];
-  pendingFollowups: FollowupMemory[];
-  topicStatuses:    TopicStatus[]; // 外部ツールから蓄積した現状スナップショット
+  inferredRole:      string;
+  inferredInterests: string[]; // 職業的関心分野・業界・趣味の推定（ニュース選定に使用。recentTopicsより長期・安定的）
+  frequentContacts:  ContactMemory[];
+  recentTopics:      string[];
+  pendingFollowups:  FollowupMemory[];
+  topicStatuses:     TopicStatus[]; // 外部ツールから蓄積した現状スナップショット
 }
 
 // Circuit breaker: skip memory extraction for the session if quota is exceeded
@@ -59,11 +60,12 @@ export const memoryService = {
       if (!snap.exists()) return null;
       const d = snap.data();
       return {
-        inferredRole:     d.inferredRole     ?? '',
-        frequentContacts: d.frequentContacts ?? [],
-        recentTopics:     d.recentTopics     ?? [],
-        pendingFollowups: d.pendingFollowups ?? [],
-        topicStatuses:    d.topicStatuses    ?? [],
+        inferredRole:      d.inferredRole      ?? '',
+        inferredInterests: d.inferredInterests ?? [],
+        frequentContacts:  d.frequentContacts  ?? [],
+        recentTopics:      d.recentTopics      ?? [],
+        pendingFollowups:  d.pendingFollowups  ?? [],
+        topicStatuses:     d.topicStatuses     ?? [],
       };
     } catch {
       return null;
@@ -111,11 +113,12 @@ export const memoryService = {
 
     const existingStr = cleanedExisting
       ? JSON.stringify({
-          inferredRole:     cleanedExisting.inferredRole,
-          frequentContacts: cleanedExisting.frequentContacts.slice(0, 8),
-          recentTopics:     cleanedExisting.recentTopics.slice(0, 10),
-          pendingFollowups: cleanedExisting.pendingFollowups.slice(0, 5),
-          topicStatuses:    cleanedExisting.topicStatuses.slice(0, 10),
+          inferredRole:      cleanedExisting.inferredRole,
+          inferredInterests: cleanedExisting.inferredInterests?.slice(0, 8) ?? [],
+          frequentContacts:  cleanedExisting.frequentContacts.slice(0, 8),
+          recentTopics:      cleanedExisting.recentTopics.slice(0, 10),
+          pendingFollowups:  cleanedExisting.pendingFollowups.slice(0, 5),
+          topicStatuses:     cleanedExisting.topicStatuses.slice(0, 10),
         }, null, 2)
       : '{}';
 
@@ -156,6 +159,9 @@ ${externalBlock}
 
 ルール:
 - inferredRole: 会議・メールのパターンから職種・役割を推定（既存があれば大きく変えない）
+- inferredInterests: メール・予定・Slack/Notion/Chatworkの内容全体から、ユーザーの職業的な関心分野・業界・趣味を推定する。
+  「テクノロジー」のような大枠ではなく「生成AI」「半導体業界」「不動産投資」「マラソン」のように具体的なジャンルで、ニュース記事のトピック検索に使える粒度にすること。
+  既存があれば大きく入れ替えず、確度の高い新情報があれば追加・統合する形で緩やかに更新する（最大8個、重要度が高い順）
 - frequentContacts: メール・外部ツールの送信者を追加・更新（最大10人、lastSeen=${today}で更新）
 - recentTopics: メール件名・予定・Slack/Chatworkのキーワードから主要トピック（最大10個）
 - pendingFollowups: 返信待ち・続きが必要そうなもの（最大5個）
@@ -169,6 +175,7 @@ ${externalBlock}
 JSONのみ返してください:
 {
   "inferredRole": "推定の職種・役割",
+  "inferredInterests": ["ジャンル1", "ジャンル2"],
   "frequentContacts": [{"name": "名前", "recentTopics": ["関連トピック"], "lastSeen": "YYYY-MM-DD"}],
   "recentTopics": ["トピック1", "トピック2"],
   "pendingFollowups": [{"contact": "名前", "topic": "内容", "since": "YYYY-MM-DD"}],
@@ -181,11 +188,57 @@ JSONのみ返してください:
       if (!match) return;
       const ctx = JSON.parse(match[0]) as UserContext;
       await this.saveContext(uid, ctx);
-      console.log('[memory] saved:', ctx.inferredRole, '/ contacts:', ctx.frequentContacts.length);
+      console.log('[memory] saved:', ctx.inferredRole, '/ interests:', ctx.inferredInterests, '/ contacts:', ctx.frequentContacts.length);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('429') || msg.includes('quota_exceeded')) return; // callGemini側でwarn済み
       console.warn('[memory] extract failed:', msg);
+    }
+  },
+
+  // 初回利用など、まだinferredInterestsが蓄積されていないユーザー向けのコールドスタート推定。
+  // 今日のメール差出人・件名・チャット内容から、その場でニュース選定に使える興味関心を推測する（1回限りの軽量呼び出し）。
+  async inferColdStartInterests(input: {
+    topEmails?:       { from: string; subject: string }[];
+    slackMessages?:   { workspace: string; channelName: string; messages: string[] }[] | null;
+    notionPages?:     { title: string; lastEditedBy?: string }[] | null;
+    chatworkMessages?: { roomName: string; accountName: string; body: string; isMention: boolean }[] | null;
+  }): Promise<string[]> {
+    const emailLines = (input.topEmails ?? []).slice(0, 8)
+      .map(e => `・${e.from}: ${e.subject}`).join('\n');
+    const slackLines = input.slackMessages?.length
+      ? input.slackMessages.map(ch => `[${ch.workspace}/${ch.channelName}] ${ch.messages.slice(0, 3).join(' / ')}`).join('\n')
+      : '';
+    const notionLines = input.notionPages?.length
+      ? input.notionPages.slice(0, 5).map(p => `・${p.title}`).join('\n')
+      : '';
+    const chatworkLines = input.chatworkMessages?.length
+      ? input.chatworkMessages.slice(0, 8).map(m => `[${m.roomName}] ${m.body.slice(0, 100)}`).join('\n')
+      : '';
+
+    const signalBlock = [emailLines, slackLines, notionLines, chatworkLines].filter(Boolean).join('\n');
+    if (!signalBlock) return [];
+
+    const prompt = `以下はあるユーザーの今日のメール差出人・件名・チャット内容の一部です。このユーザーはまだ記憶が蓄積されていない初回〜数回目の利用です。
+差出人の会社名・ドメイン・件名や本文のキーワードから、このユーザーの職業的な関心分野・業界・趣味を推測してください。
+「テクノロジー」のような大枠ではなく「生成AI」「半導体業界」「不動産投資」のように具体的なジャンルで、ニュース記事のトピック検索に使える粒度にすること。
+根拠が薄いものは無理に埋めず、確度の高いものだけ挙げてください（該当が無ければ0個でよい）。
+
+【データ】
+${signalBlock}
+
+JSON配列のみ返してください（最大5個）:
+["ジャンル1", "ジャンル2"]`;
+
+    try {
+      const raw   = await callGemini(prompt);
+      const match = raw.match(/\[[\s\S]*\]/);
+      if (!match) return [];
+      const arr = JSON.parse(match[0]);
+      return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string').slice(0, 5) : [];
+    } catch (e) {
+      console.warn('[memory] cold-start interest inference failed:', e);
+      return [];
     }
   },
 };

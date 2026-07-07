@@ -13,18 +13,18 @@ async function writeAudioFile(base64: string, filename: string): Promise<string>
 }
 
 export const googleTtsService = {
-  async generateAudio(text: string): Promise<string> {
+  async generateAudio(text: string, language?: string): Promise<string> {
     const { audioBase64 } = await callFunction<{ audioBase64: string }>(
       'googleTts',
-      { text }
+      { text, language }
     );
     return writeAudioFile(audioBase64, `brief_${Date.now()}.mp3`);
   },
 
-  async generateDialogueAudio(dialogue: DialogueTurn[]): Promise<string> {
+  async generateDialogueAudio(dialogue: DialogueTurn[], language?: string): Promise<string> {
     const { audioBase64 } = await callFunction<{ audioBase64: string }>(
       'googleTts',
-      { dialogue }
+      { dialogue, language }
     );
     return writeAudioFile(audioBase64, `brief_${Date.now()}.mp3`);
   },

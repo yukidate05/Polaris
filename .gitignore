@@ -44,6 +44,9 @@ yarn-error.*
 # Firebase iOS config (contains API keys)
 GoogleService-Info.plist
 
+# Play Console service account key
+polaris-app-yukid-*.json
+
 # Firebase Functions compiled output
 functions/lib/
 
