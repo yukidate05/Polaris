@@ -348,7 +348,7 @@ users/{uid}/cache/dailyNews    // date, language, chapters, cachedAt
 | トラック | 状態 | バージョン |
 |---|---|---|
 | 内部テスト | アップロード済み | vc38 |
-| クローズドテスト Alpha | 審査中 | vc8 |
+| クローズドテスト Alpha | 配信中（2026-07-10にvc8→vc38へ昇格。APIで`completed`確認済み。テスターはGoogleグループ`polaris-testers@googlegroups.com`+オプトインURL `play.google.com/apps/testing/com.yukid.polaris` の踏み込みが必要） | vc38 |
 | 製品版 | 未提出 | — |
 
 ---
