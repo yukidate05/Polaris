@@ -306,9 +306,11 @@ users/{uid}/cache/dailyNews    // date, language, chapters, cachedAt
 
 | トラック | 状態 | バージョン |
 |---|---|---|
-| 内部テスト | アップロード済み | vc32 |
-| クローズドテスト Alpha | 審査中 | vc8 |
+| クローズドテスト Alpha（実テスター在籍: `polaris-testers@googlegroups.com`） | アップロード済み | vc39（2026-07-18、テスターフィードバック7件対応） |
+| 内部テスト（テスター未登録・実質未使用） | アップロード済み（参考） | vc38 |
 | 製品版 | 未提出 | — |
+
+**注記（2026-07-18）**: Play Developer APIで直接確認した結果、`internal`トラックにはテスターが1人も登録されておらず、実際のフィードバックはすべて`alpha`トラックのGoogleグループ経由。`upload_aab.mjs`のデフォルト提出先を`internal`→`alpha`に変更済み。今後のアップロードは`node upload_aab.mjs polaris-vc{N}.aab`でalphaへ提出される。
 
 ---
 
@@ -340,7 +342,7 @@ eas build --platform android --profile development
    ```bash
    node upload_aab.mjs polaris-vc{N}.aab
    ```
-   前提: サービスアカウントJSON `C:/Users/yukid/Downloads/polaris-app-yukid-458b1ff906c2.json` が存在すること。アップロード先: `internal`トラック。
+   前提: サービスアカウントJSON `secrets/polaris-app-yukid-458b1ff906c2.json`(プロジェクトルート直下、Git管理外)が存在すること。アップロード先: `internal`トラック。
 
 ### Web
 ```bash

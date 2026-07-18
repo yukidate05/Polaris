@@ -65,5 +65,8 @@ img/icon/ChatGPT*
 # Firebase CLI local cache
 .firebase/
 
+# Local secrets (Play Console service account key, etc.)
+/secrets/
+
 # Separate clone (GitHub Pages docs, tracked independently on main)
 /docs

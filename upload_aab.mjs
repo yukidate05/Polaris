@@ -4,9 +4,9 @@ import { google } from 'googleapis';
 import fs from 'fs';
 import path from 'path';
 
-const SERVICE_ACCOUNT_KEY = 'C:/Users/yukid/Downloads/polaris-app-yukid-458b1ff906c2.json';
+const SERVICE_ACCOUNT_KEY = new URL('./secrets/polaris-app-yukid-458b1ff906c2.json', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const PACKAGE_NAME = 'com.yukid.polaris';
-const TRACK = 'internal';
+const TRACK = 'alpha';
 
 const aabPath = process.argv[2];
 if (!aabPath) { console.error('Usage: node upload_aab.mjs <path-to-aab>'); process.exit(1); }
@@ -53,7 +53,7 @@ async function upload() {
   // 4. Commit
   console.log('Committing edit...');
   await publisher.edits.commit({ packageName: PACKAGE_NAME, editId });
-  console.log('Done! AAB uploaded to internal testing track.');
+  console.log(`Done! AAB uploaded to ${TRACK} track.`);
 }
 
 upload().catch(e => { console.error(e?.response?.data ?? e?.message ?? e); process.exit(1); });
