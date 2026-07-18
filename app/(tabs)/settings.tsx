@@ -446,9 +446,9 @@ export default function SettingsScreen() {
                     accessStatus?.reason === 'trial' && styles.planPillTextTrial,
                   ]}>
                     {accessStatus?.reason === 'pro'
-                      ? 'Pro プラン'
+                      ? t('pro_plan')
                       : accessStatus?.reason === 'trial'
-                      ? `トライアル中（残${accessStatus.trialDaysLeft}日）`
+                      ? t('trial_active_days_left', { n: accessStatus.trialDaysLeft })
                       : t('free_plan')}
                   </Text>
                 </View>

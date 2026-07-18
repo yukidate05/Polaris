@@ -3,6 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@constants/colors';
 import type { AccessStatus } from '@services/subscriptionService';
+import { useT } from '@/i18n';
 
 interface PaywallModalProps {
   visible:   boolean;
@@ -11,24 +12,25 @@ interface PaywallModalProps {
   onDismiss: () => void;
 }
 
-const FEATURES = [
-  { icon: 'infinite-outline',  text: '毎日のブリーフィング（無制限）' },
-  { icon: 'time-outline',      text: '10分のブリーフィング' },
-  { icon: 'newspaper-outline', text: 'パーソナライズされたニュース' },
-  { icon: 'logo-slack',        text: 'Notion / Slack 連携' },
-];
-
 export function PaywallModal({ visible, status, onUpgrade, onDismiss }: PaywallModalProps) {
+  const t = useT();
   const isCooldown = status?.reason === 'cooldown_active';
   const daysLeft   = status?.cooldownDaysLeft ?? 0;
 
+  const FEATURES = [
+    { icon: 'infinite-outline',  text: t('paywall_feature_unlimited') },
+    { icon: 'time-outline',      text: t('paywall_feature_10min') },
+    { icon: 'newspaper-outline', text: t('paywall_feature_news') },
+    { icon: 'logo-slack',        text: t('paywall_feature_integrations') },
+  ];
+
   const headline = isCooldown
-    ? `次の生成まで残り ${daysLeft} 日`
-    : '5日間のトライアルが終了しました';
+    ? t('paywall_cooldown_headline', { n: daysLeft })
+    : t('paywall_trial_ended_headline');
 
   const subtext = isCooldown
-    ? `無料プランは3日に1回ブリーフィングを生成できます。\nPolaris Pro なら毎日使い放題です。`
-    : '毎日のブリーフィングを続けるには\nPolaris Pro へのアップグレードが必要です。';
+    ? t('paywall_cooldown_subtext')
+    : t('paywall_trial_ended_subtext');
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onDismiss}>
@@ -66,13 +68,13 @@ export function PaywallModal({ visible, status, onUpgrade, onDismiss }: PaywallM
 
             {/* CTA */}
             <TouchableOpacity style={styles.upgradeBtn} onPress={onUpgrade} activeOpacity={0.85}>
-              <Text style={styles.upgradeBtnText}>Polaris Pro にアップグレード</Text>
+              <Text style={styles.upgradeBtnText}>{t('paywall_upgrade_cta')}</Text>
             </TouchableOpacity>
 
             {/* 却下 */}
             <TouchableOpacity onPress={onDismiss} style={styles.dismissBtn} activeOpacity={0.7}>
               <Text style={styles.dismissText}>
-                {isCooldown ? `${daysLeft}日後に使う` : '今はやめておく'}
+                {isCooldown ? t('paywall_dismiss_cooldown', { n: daysLeft }) : t('paywall_dismiss_default')}
               </Text>
             </TouchableOpacity>
           </View>

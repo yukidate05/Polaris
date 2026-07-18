@@ -1,10 +1,10 @@
-// Play Console internal track uploader
+// Play Console uploader (target track set by TRACK below)
 // Usage: node upload_aab.mjs <path-to-aab>
 import { google } from 'googleapis';
 import fs from 'fs';
 import path from 'path';
 
-const SERVICE_ACCOUNT_KEY = new URL('./secrets/polaris-app-yukid-458b1ff906c2.json', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const SERVICE_ACCOUNT_KEY = path.join(import.meta.dirname, 'polaris-app-yukid-458b1ff906c2.json');
 const PACKAGE_NAME = 'com.yukid.polaris';
 const TRACK = 'alpha';
 
